@@ -35,5 +35,12 @@ harness = false
 name = "mmdr"
 path = "src/main.rs"
 
+[profile.release]
+strip = true
+lto = "fat"
+opt-level = "z"
+codegen-units = 1
+panic = "abort"
+
 [patch.crates-io]
 dagre_rust = { path = "vendor/dagre_rust" }
