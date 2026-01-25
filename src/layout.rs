@@ -207,8 +207,64 @@ pub struct Layout {
     pub pie_center: (f32, f32),
     pub pie_radius: f32,
     pub pie_title: Option<PieTitleLayout>,
+    pub quadrant: Option<QuadrantLayout>,
+    pub gantt: Option<GanttLayout>,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuadrantLayout {
+    pub title: Option<TextBlock>,
+    pub title_y: f32,
+    pub x_axis_left: Option<TextBlock>,
+    pub x_axis_right: Option<TextBlock>,
+    pub y_axis_bottom: Option<TextBlock>,
+    pub y_axis_top: Option<TextBlock>,
+    pub quadrant_labels: [Option<TextBlock>; 4],
+    pub points: Vec<QuadrantPointLayout>,
+    pub grid_x: f32,
+    pub grid_y: f32,
+    pub grid_width: f32,
+    pub grid_height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuadrantPointLayout {
+    pub label: TextBlock,
+    pub x: f32,
+    pub y: f32,
+    pub color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GanttLayout {
+    pub title: Option<TextBlock>,
+    pub sections: Vec<GanttSectionLayout>,
+    pub tasks: Vec<GanttTaskLayout>,
+    pub time_start: f32,
+    pub time_end: f32,
+    pub chart_x: f32,
+    pub chart_y: f32,
+    pub chart_width: f32,
+    pub chart_height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GanttSectionLayout {
+    pub label: TextBlock,
+    pub y: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GanttTaskLayout {
+    pub label: TextBlock,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: String,
 }
 
 #[derive(Debug, Clone)]
@@ -268,18 +324,18 @@ pub fn compute_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
             compute_sequence_layout(graph, theme, config)
         }
         crate::ir::DiagramKind::Pie => compute_pie_layout(graph, theme, config),
+        crate::ir::DiagramKind::Quadrant => compute_quadrant_layout(graph, theme, config),
+        crate::ir::DiagramKind::Gantt => compute_gantt_layout(graph, theme, config),
         crate::ir::DiagramKind::Class
         | crate::ir::DiagramKind::State
         | crate::ir::DiagramKind::Er
         | crate::ir::DiagramKind::Mindmap
         | crate::ir::DiagramKind::Journey
         | crate::ir::DiagramKind::Timeline
-        | crate::ir::DiagramKind::Gantt
         | crate::ir::DiagramKind::Requirement
         | crate::ir::DiagramKind::GitGraph
         | crate::ir::DiagramKind::C4
         | crate::ir::DiagramKind::Sankey
-        | crate::ir::DiagramKind::Quadrant
         | crate::ir::DiagramKind::Block
         | crate::ir::DiagramKind::Packet
         | crate::ir::DiagramKind::Kanban
@@ -401,9 +457,198 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         pie_center: (center_x, center_y),
         pie_radius: radius,
         pie_title: title_layout,
+        quadrant: None,
+        gantt: None,
         width: width.max(200.0),
         height: height.max(200.0),
     }
+}
+
+fn compute_quadrant_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
+    let padding = theme.font_size * 2.0;
+    let grid_size = 400.0;
+    let point_radius = 5.0;
+
+    // Measure title
+    let title = graph.quadrant.title.as_ref().map(|t| measure_label(t, theme, config));
+    let title_height = title.as_ref().map(|t| t.height + padding).unwrap_or(0.0);
+
+    // Measure axis labels
+    let x_left = graph.quadrant.x_axis_left.as_ref().map(|t| measure_label(t, theme, config));
+    let x_right = graph.quadrant.x_axis_right.as_ref().map(|t| measure_label(t, theme, config));
+    let y_bottom = graph.quadrant.y_axis_bottom.as_ref().map(|t| measure_label(t, theme, config));
+    let y_top = graph.quadrant.y_axis_top.as_ref().map(|t| measure_label(t, theme, config));
+
+    // Measure quadrant labels
+    let q_labels: [Option<TextBlock>; 4] = [
+        graph.quadrant.quadrant_labels[0].as_ref().map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[1].as_ref().map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[2].as_ref().map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[3].as_ref().map(|t| measure_label(t, theme, config)),
+    ];
+
+    let y_axis_width = y_bottom.as_ref().map(|t| t.height + padding).unwrap_or(padding);
+    let x_axis_height = x_left.as_ref().map(|t| t.height + padding).unwrap_or(padding);
+
+    let grid_x = y_axis_width + padding;
+    let grid_y = title_height + padding;
+
+    // Layout points
+    let palette = quadrant_palette(theme);
+    let points: Vec<QuadrantPointLayout> = graph.quadrant.points.iter().enumerate().map(|(i, p)| {
+        let px = grid_x + p.x.clamp(0.0, 1.0) * grid_size;
+        let py = grid_y + (1.0 - p.y.clamp(0.0, 1.0)) * grid_size; // Invert Y
+        QuadrantPointLayout {
+            label: measure_label(&p.label, theme, config),
+            x: px,
+            y: py,
+            color: palette[i % palette.len()].clone(),
+        }
+    }).collect();
+
+    let width = grid_x + grid_size + padding * 2.0;
+    let height = grid_y + grid_size + x_axis_height + padding;
+
+    Layout {
+        kind: graph.kind,
+        nodes: BTreeMap::new(),
+        edges: Vec::new(),
+        subgraphs: Vec::new(),
+        lifelines: Vec::new(),
+        sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
+        sequence_frames: Vec::new(),
+        sequence_notes: Vec::new(),
+        sequence_activations: Vec::new(),
+        sequence_numbers: Vec::new(),
+        state_notes: Vec::new(),
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
+        quadrant: Some(QuadrantLayout {
+            title,
+            title_y: title_height / 2.0,
+            x_axis_left: x_left,
+            x_axis_right: x_right,
+            y_axis_bottom: y_bottom,
+            y_axis_top: y_top,
+            quadrant_labels: q_labels,
+            points,
+            grid_x,
+            grid_y,
+            grid_width: grid_size,
+            grid_height: grid_size,
+        }),
+        gantt: None,
+        width,
+        height,
+    }
+}
+
+fn quadrant_palette(theme: &Theme) -> Vec<String> {
+    vec![
+        "#6366f1".to_string(), // indigo
+        "#f59e0b".to_string(), // amber
+        "#10b981".to_string(), // emerald
+        "#ef4444".to_string(), // red
+        "#8b5cf6".to_string(), // violet
+        "#06b6d4".to_string(), // cyan
+    ]
+}
+
+fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
+    let padding = theme.font_size * 1.5;
+    let row_height = theme.font_size * 2.5;
+    let label_width = 150.0;
+    let chart_width = 400.0;
+
+    // Title
+    let title = graph.gantt_title.as_ref().map(|t| measure_label(t, theme, config));
+    let title_height = title.as_ref().map(|t| t.height + padding).unwrap_or(0.0);
+
+    let chart_x = padding + label_width;
+    let chart_y = title_height + padding;
+
+    // Layout tasks
+    let palette = gantt_palette(theme);
+    let mut current_section: Option<String> = None;
+    let mut sections: Vec<GanttSectionLayout> = Vec::new();
+    let mut tasks: Vec<GanttTaskLayout> = Vec::new();
+    let mut y = chart_y;
+
+    for (i, task) in graph.gantt_tasks.iter().enumerate() {
+        // Check for section change
+        if task.section != current_section {
+            if let Some(ref sec) = task.section {
+                sections.push(GanttSectionLayout {
+                    label: measure_label(sec, theme, config),
+                    y,
+                    height: row_height,
+                });
+                y += row_height;
+            }
+            current_section = task.section.clone();
+        }
+
+        tasks.push(GanttTaskLayout {
+            label: measure_label(&task.label, theme, config),
+            x: chart_x,
+            y,
+            width: chart_width * 0.6, // placeholder width
+            height: row_height * 0.8,
+            color: palette[i % palette.len()].clone(),
+        });
+        y += row_height;
+    }
+
+    let height = y + padding;
+    let width = chart_x + chart_width + padding;
+
+    Layout {
+        kind: graph.kind,
+        nodes: BTreeMap::new(),
+        edges: Vec::new(),
+        subgraphs: Vec::new(),
+        lifelines: Vec::new(),
+        sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
+        sequence_frames: Vec::new(),
+        sequence_notes: Vec::new(),
+        sequence_activations: Vec::new(),
+        sequence_numbers: Vec::new(),
+        state_notes: Vec::new(),
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
+        quadrant: None,
+        gantt: Some(GanttLayout {
+            title,
+            sections,
+            tasks,
+            time_start: 0.0,
+            time_end: 100.0,
+            chart_x,
+            chart_y,
+            chart_width,
+            chart_height: y - chart_y,
+        }),
+        width,
+        height,
+    }
+}
+
+fn gantt_palette(theme: &Theme) -> Vec<String> {
+    vec![
+        theme.primary_color.clone(),
+        "#60a5fa".to_string(), // blue-400
+        "#34d399".to_string(), // emerald-400
+        "#a78bfa".to_string(), // violet-400
+        "#fb923c".to_string(), // orange-400
+    ]
 }
 
 fn pie_palette(theme: &Theme) -> Vec<String> {
@@ -789,6 +1034,8 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
         pie_center: (0.0, 0.0),
         pie_radius: 0.0,
         pie_title: None,
+        quadrant: None,
+        gantt: None,
         width,
         height,
     }
@@ -1834,6 +2081,8 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         pie_center: (0.0, 0.0),
         pie_radius: 0.0,
         pie_title: None,
+        quadrant: None,
+        gantt: None,
         width,
         height,
     }

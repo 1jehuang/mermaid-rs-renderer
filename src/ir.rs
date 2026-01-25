@@ -87,6 +87,34 @@ pub struct PieSlice {
 }
 
 #[derive(Debug, Clone)]
+pub struct QuadrantPoint {
+    pub label: String,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QuadrantData {
+    pub title: Option<String>,
+    pub x_axis_left: Option<String>,
+    pub x_axis_right: Option<String>,
+    pub y_axis_bottom: Option<String>,
+    pub y_axis_top: Option<String>,
+    pub quadrant_labels: [Option<String>; 4], // top-right, top-left, bottom-left, bottom-right
+    pub points: Vec<QuadrantPoint>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GanttTask {
+    pub id: String,
+    pub label: String,
+    pub start: Option<String>,
+    pub duration: Option<String>,
+    pub after: Option<String>,
+    pub section: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SequenceBox {
     pub label: Option<String>,
     pub color: Option<String>,
@@ -206,6 +234,10 @@ pub struct Graph {
     pub pie_slices: Vec<PieSlice>,
     pub pie_title: Option<String>,
     pub pie_show_data: bool,
+    pub quadrant: QuadrantData,
+    pub gantt_tasks: Vec<GanttTask>,
+    pub gantt_title: Option<String>,
+    pub gantt_sections: Vec<String>,
     pub class_defs: HashMap<String, NodeStyle>,
     pub node_classes: HashMap<String, Vec<String>>,
     pub node_styles: HashMap<String, NodeStyle>,
@@ -256,6 +288,10 @@ impl Graph {
             pie_slices: Vec::new(),
             pie_title: None,
             pie_show_data: false,
+            quadrant: QuadrantData::default(),
+            gantt_tasks: Vec::new(),
+            gantt_title: None,
+            gantt_sections: Vec::new(),
             class_defs: HashMap::new(),
             node_classes: HashMap::new(),
             node_styles: HashMap::new(),

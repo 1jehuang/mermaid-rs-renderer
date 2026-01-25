@@ -1472,6 +1472,16 @@ fn parse_pie_diagram(input: &str) -> Result<ParseOutput> {
             if lower.contains("showdata") {
                 graph.pie_show_data = true;
             }
+            // Check for title on the same line: "pie title My Title"
+            if let Some(title_pos) = lower.find("title") {
+                let title_start = title_pos + 5; // len("title")
+                if let Some(title) = line.get(title_start..) {
+                    let title = title.trim();
+                    if !title.is_empty() {
+                        graph.pie_title = Some(title.to_string());
+                    }
+                }
+            }
             continue;
         }
         if lower.starts_with("showdata") {
@@ -1776,6 +1786,7 @@ fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
     let (lines, init_config) = preprocess_input(input)?;
 
     let mut current_section: Option<usize> = None;
+    let mut current_section_name: Option<String> = None;
     let mut last_task: Option<String> = None;
 
     for raw_line in lines {
@@ -1787,8 +1798,14 @@ fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
         if lower.starts_with("gantt") {
             continue;
         }
-        if lower.starts_with("title")
-            || lower.starts_with("dateformat")
+        if lower.starts_with("title") {
+            let title = line.get(5..).unwrap_or("").trim();
+            if !title.is_empty() {
+                graph.gantt_title = Some(title.to_string());
+            }
+            continue;
+        }
+        if lower.starts_with("dateformat")
             || lower.starts_with("axisformat")
             || lower.starts_with("tickinterval")
             || lower.starts_with("todaymarker")
@@ -1807,6 +1824,8 @@ fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
                 direction: None,
             });
             current_section = Some(graph.subgraphs.len() - 1);
+            current_section_name = Some(label.to_string());
+            graph.gantt_sections.push(label.to_string());
             last_task = None;
             continue;
         }
@@ -1817,11 +1836,23 @@ fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
                 continue;
             }
             let (id, details, after) = parse_gantt_task_meta(meta);
-            let node_id = id.unwrap_or_else(|| format!("gantt_{}", graph.nodes.len()));
+            let node_id = id.clone().unwrap_or_else(|| format!("gantt_{}", graph.nodes.len()));
             let mut node_label = label.to_string();
             if !details.is_empty() {
                 node_label.push_str(&format!("\n{}", details.join(" | ")));
             }
+
+            // Add to gantt_tasks
+            let (start, duration) = extract_gantt_timing(&details);
+            graph.gantt_tasks.push(crate::ir::GanttTask {
+                id: node_id.clone(),
+                label: label.to_string(),
+                start,
+                duration,
+                after: after.clone(),
+                section: current_section_name.clone(),
+            });
+
             graph.ensure_node(
                 &node_id,
                 Some(node_label),
@@ -1925,6 +1956,19 @@ fn looks_like_duration(token: &str) -> bool {
         lower.chars().last(),
         Some('d') | Some('h') | Some('w') | Some('m') | Some('y')
     )
+}
+
+fn extract_gantt_timing(details: &[String]) -> (Option<String>, Option<String>) {
+    let mut start: Option<String> = None;
+    let mut duration: Option<String> = None;
+    for detail in details {
+        if looks_like_date(detail) && start.is_none() {
+            start = Some(detail.clone());
+        } else if looks_like_duration(detail) && duration.is_none() {
+            duration = Some(detail.clone());
+        }
+    }
+    (start, duration)
 }
 
 fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
@@ -2429,43 +2473,72 @@ fn parse_quadrant_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
         let lower = line.to_ascii_lowercase();
-        if lower.starts_with("quadrantchart")
-            || lower.starts_with("title")
-            || lower.starts_with("x-axis")
-            || lower.starts_with("y-axis")
-            || lower.starts_with("quadrant-")
-        {
+        if lower.starts_with("quadrantchart") {
             continue;
         }
-        if let Some((label, coords)) = parse_quadrant_point(line) {
-            let node_id = format!("quadrant_{}", graph.nodes.len());
-            let node_label = format!("{}\n{}", label, coords);
-            graph.ensure_node(
-                &node_id,
-                Some(node_label),
-                Some(crate::ir::NodeShape::Circle),
-            );
+        if lower.starts_with("title") {
+            let title = line.get(5..).unwrap_or("").trim();
+            if !title.is_empty() {
+                graph.quadrant.title = Some(title.to_string());
+            }
+            continue;
+        }
+        if lower.starts_with("x-axis") {
+            // Format: x-axis Low Reach --> High Reach
+            let rest = line.get(6..).unwrap_or("").trim();
+            if let Some((left, right)) = rest.split_once("-->") {
+                graph.quadrant.x_axis_left = Some(left.trim().to_string());
+                graph.quadrant.x_axis_right = Some(right.trim().to_string());
+            }
+            continue;
+        }
+        if lower.starts_with("y-axis") {
+            // Format: y-axis Low Engagement --> High Engagement
+            let rest = line.get(6..).unwrap_or("").trim();
+            if let Some((bottom, top)) = rest.split_once("-->") {
+                graph.quadrant.y_axis_bottom = Some(bottom.trim().to_string());
+                graph.quadrant.y_axis_top = Some(top.trim().to_string());
+            }
+            continue;
+        }
+        if lower.starts_with("quadrant-") {
+            // Format: quadrant-1 We should expand
+            if let Some(rest) = line.get(10..) {
+                let label = rest.trim().to_string();
+                if lower.starts_with("quadrant-1") {
+                    graph.quadrant.quadrant_labels[0] = Some(label);
+                } else if lower.starts_with("quadrant-2") {
+                    graph.quadrant.quadrant_labels[1] = Some(label);
+                } else if lower.starts_with("quadrant-3") {
+                    graph.quadrant.quadrant_labels[2] = Some(label);
+                } else if lower.starts_with("quadrant-4") {
+                    graph.quadrant.quadrant_labels[3] = Some(label);
+                }
+            }
+            continue;
+        }
+        // Parse data points: Campaign A: [0.3, 0.6]
+        if let Some((label, x, y)) = parse_quadrant_point_coords(line) {
+            graph.quadrant.points.push(crate::ir::QuadrantPoint { label, x, y });
         }
     }
 
     Ok(ParseOutput { graph, init_config })
 }
 
-fn parse_quadrant_point(line: &str) -> Option<(String, String)> {
+fn parse_quadrant_point_coords(line: &str) -> Option<(String, f32, f32)> {
     let (left, right) = line.split_once(':')?;
-    let label = left.trim();
+    let label = left.trim().to_string();
     if label.is_empty() {
         return None;
     }
     let coords = right.trim().trim_matches(|ch| ch == '[' || ch == ']' || ch == '(' || ch == ')');
-    let mut parts = coords
-        .split(',')
-        .map(|part| part.trim())
-        .filter(|part| !part.is_empty());
-    let x = parts.next()?;
-    let y = parts.next()?;
-    Some((label.to_string(), format!("{}, {}", x, y)))
+    let mut parts = coords.split(',').map(|p| p.trim());
+    let x: f32 = parts.next()?.parse().ok()?;
+    let y: f32 = parts.next()?.parse().ok()?;
+    Some((label, x, y))
 }
+
 
 fn parse_zenuml_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();

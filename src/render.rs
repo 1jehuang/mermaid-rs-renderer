@@ -105,6 +105,18 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
         return svg;
     }
 
+    if let Some(ref quadrant) = layout.quadrant {
+        svg.push_str(&render_quadrant(quadrant, theme, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
+    if let Some(ref gantt) = layout.gantt {
+        svg.push_str(&render_gantt(gantt, theme, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
     for subgraph in &layout.subgraphs {
         let label_empty = subgraph.label.trim().is_empty();
         if is_state {
@@ -1001,6 +1013,214 @@ fn pie_slice_path(cx: f32, cy: f32, radius: f32, start_angle: f32, end_angle: f3
     format!(
         "M {cx:.2} {cy:.2} L {sx:.2} {sy:.2} A {radius:.2} {radius:.2} 0 {large_arc} {sweep} {ex:.2} {ey:.2} Z"
     )
+}
+
+fn render_quadrant(
+    layout: &crate::layout::QuadrantLayout,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> String {
+    let mut svg = String::new();
+    let grid_x = layout.grid_x;
+    let grid_y = layout.grid_y;
+    let w = layout.grid_width;
+    let h = layout.grid_height;
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+
+    // Quadrant background colors
+    let q_colors = ["#ECECFF", "#f1f1ff", "#f6f6ff", "#fbfbff"];
+
+    // Draw 4 quadrant backgrounds
+    // Q1 top-right, Q2 top-left, Q3 bottom-left, Q4 bottom-right
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        grid_x + half_w, grid_y, half_w, half_h, q_colors[0]
+    ));
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        grid_x, grid_y, half_w, half_h, q_colors[1]
+    ));
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        grid_x, grid_y + half_h, half_w, half_h, q_colors[2]
+    ));
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        grid_x + half_w, grid_y + half_h, half_w, half_h, q_colors[3]
+    ));
+
+    // Draw border
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"none\" stroke=\"#c7c7f1\" stroke-width=\"2\"/>",
+        grid_x, grid_y, w, h
+    ));
+    // Center lines
+    svg.push_str(&format!(
+        "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#c7c7f1\" stroke-width=\"1\"/>",
+        grid_x + half_w, grid_y, grid_x + half_w, grid_y + h
+    ));
+    svg.push_str(&format!(
+        "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#c7c7f1\" stroke-width=\"1\"/>",
+        grid_x, grid_y + half_h, grid_x + w, grid_y + half_h
+    ));
+
+    // Title
+    if let Some(ref title) = layout.title {
+        svg.push_str(&text_block_svg(
+            grid_x + half_w,
+            layout.title_y,
+            title,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    // Quadrant labels
+    let label_positions = [
+        (grid_x + half_w + half_w / 2.0, grid_y + 15.0), // Q1 top-right
+        (grid_x + half_w / 2.0, grid_y + 15.0),          // Q2 top-left
+        (grid_x + half_w / 2.0, grid_y + half_h + 15.0), // Q3 bottom-left
+        (grid_x + half_w + half_w / 2.0, grid_y + half_h + 15.0), // Q4 bottom-right
+    ];
+    for (i, label_opt) in layout.quadrant_labels.iter().enumerate() {
+        if let Some(label) = label_opt {
+            let (lx, ly) = label_positions[i];
+            svg.push_str(&text_block_svg(lx, ly, label, theme, config, false, Some("#131300")));
+        }
+    }
+
+    // Axis labels
+    if let Some(ref x_left) = layout.x_axis_left {
+        svg.push_str(&text_block_svg(
+            grid_x + half_w / 2.0,
+            grid_y + h + 20.0,
+            x_left,
+            theme,
+            config,
+            false,
+            Some("#131300"),
+        ));
+    }
+    if let Some(ref x_right) = layout.x_axis_right {
+        svg.push_str(&text_block_svg(
+            grid_x + half_w + half_w / 2.0,
+            grid_y + h + 20.0,
+            x_right,
+            theme,
+            config,
+            false,
+            Some("#131300"),
+        ));
+    }
+    if let Some(ref y_bottom) = layout.y_axis_bottom {
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" transform=\"rotate(-90 {:.2} {:.2})\" font-family=\"{}\" font-size=\"{}\" fill=\"#131300\"><tspan>{}</tspan></text>",
+            grid_x - 15.0,
+            grid_y + half_h + half_h / 2.0,
+            grid_x - 15.0,
+            grid_y + half_h + half_h / 2.0,
+            theme.font_family,
+            theme.font_size,
+            y_bottom.lines.first().map(|s| s.as_str()).unwrap_or("")
+        ));
+    }
+    if let Some(ref y_top) = layout.y_axis_top {
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" transform=\"rotate(-90 {:.2} {:.2})\" font-family=\"{}\" font-size=\"{}\" fill=\"#131300\"><tspan>{}</tspan></text>",
+            grid_x - 15.0,
+            grid_y + half_h / 2.0,
+            grid_x - 15.0,
+            grid_y + half_h / 2.0,
+            theme.font_family,
+            theme.font_size,
+            y_top.lines.first().map(|s| s.as_str()).unwrap_or("")
+        ));
+    }
+
+    // Data points
+    for point in &layout.points {
+        svg.push_str(&format!(
+            "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"5\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+            point.x, point.y, point.color, point.color
+        ));
+        svg.push_str(&text_block_svg(
+            point.x,
+            point.y + 15.0,
+            &point.label,
+            theme,
+            config,
+            false,
+            Some("#131300"),
+        ));
+    }
+
+    svg
+}
+
+fn render_gantt(
+    layout: &crate::layout::GanttLayout,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> String {
+    let mut svg = String::new();
+
+    // Title
+    if let Some(ref title) = layout.title {
+        svg.push_str(&text_block_svg(
+            layout.chart_x + layout.chart_width / 2.0,
+            20.0,
+            title,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    // Draw sections
+    for section in &layout.sections {
+        svg.push_str(&format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\" stroke=\"none\"/>",
+            0.0,
+            section.y,
+            layout.chart_x + layout.chart_width,
+            section.height,
+            "#FFFFDE"
+        ));
+        svg.push_str(&text_block_svg(
+            10.0 + section.label.width / 2.0,
+            section.y + section.height / 2.0,
+            &section.label,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    // Draw tasks as bars
+    for task in &layout.tasks {
+        // Task bar
+        svg.push_str(&format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"3\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+            task.x, task.y + 2.0, task.width, task.height - 4.0, task.color, theme.primary_border_color
+        ));
+        // Task label
+        svg.push_str(&text_block_svg(
+            task.x - 5.0 - task.label.width / 2.0,
+            task.y + task.height / 2.0,
+            &task.label,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    svg
 }
 
 fn text_block_svg(
