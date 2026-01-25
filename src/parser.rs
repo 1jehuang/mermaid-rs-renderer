@@ -1481,11 +1481,91 @@ fn parse_node_only(line: &str) -> Option<NodeTokenParts> {
     }
 }
 
+/// Mask content inside brackets to prevent edge detection from matching dashes in labels.
+/// Returns a string where characters inside [...], (...), {...}, "...", '...' are replaced with spaces.
+fn mask_bracket_content(line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let mut depth_square = 0;
+    let mut depth_paren = 0;
+    let mut depth_curly = 0;
+    let mut in_double_quote = false;
+    let mut in_single_quote = false;
+    let mut prev_char = '\0';
+
+    for ch in line.chars() {
+        let in_bracket = depth_square > 0 || depth_paren > 0 || depth_curly > 0;
+        let in_quote = in_double_quote || in_single_quote;
+
+        match ch {
+            '[' if !in_quote => {
+                depth_square += 1;
+                result.push(ch);
+            }
+            ']' if !in_quote && depth_square > 0 => {
+                depth_square -= 1;
+                result.push(ch);
+            }
+            '(' if !in_quote && !in_bracket => {
+                depth_paren += 1;
+                result.push(ch);
+            }
+            ')' if !in_quote && depth_paren > 0 => {
+                depth_paren -= 1;
+                result.push(ch);
+            }
+            '{' if !in_quote && !in_bracket => {
+                depth_curly += 1;
+                result.push(ch);
+            }
+            '}' if !in_quote && depth_curly > 0 => {
+                depth_curly -= 1;
+                result.push(ch);
+            }
+            '"' if prev_char != '\\' => {
+                in_double_quote = !in_double_quote;
+                if in_bracket || in_quote {
+                    result.push(' ');
+                } else {
+                    result.push(ch);
+                }
+            }
+            '\'' if prev_char != '\\' => {
+                in_single_quote = !in_single_quote;
+                if in_bracket || in_quote {
+                    result.push(' ');
+                } else {
+                    result.push(ch);
+                }
+            }
+            _ => {
+                if in_bracket || in_quote {
+                    result.push(' ');
+                } else {
+                    result.push(ch);
+                }
+            }
+        }
+        prev_char = ch;
+    }
+    result
+}
+
 fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMeta)> {
-    if let Some(caps) = PIPE_LABEL_RE.captures(line) {
-        let left = caps.name("left")?.as_str().trim();
-        let right = caps.name("right")?.as_str().trim();
-        let label_clean = caps.name("label")?.as_str().trim();
+    // Mask bracket content to prevent matching dashes inside labels like A[wi-fi]
+    let masked = mask_bracket_content(line);
+
+    // Helper to extract from original line using match positions from masked line
+    let extract = |m: regex::Match| -> &str {
+        &line[m.start()..m.end()]
+    };
+
+    if let Some(caps) = PIPE_LABEL_RE.captures(&masked) {
+        let left_match = caps.name("left")?;
+        let right_match = caps.name("right")?;
+        let label_match = caps.name("label")?;
+        let left = extract(left_match).trim();
+        let right = extract(right_match).trim();
+        let label_clean = extract(label_match).trim();
         if !label_clean.is_empty() && !left.is_empty() && !right.is_empty() {
             let arrow1 = caps.name("arrow1")?.as_str();
             let arrow2 = caps.name("arrow2")?.as_str();
@@ -1500,10 +1580,13 @@ fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMe
         }
     }
 
-    if let Some(caps) = LABEL_ARROW_RE.captures(line) {
-        let left = caps.name("left")?.as_str().trim();
-        let right = caps.name("right")?.as_str().trim();
-        let label_raw = caps.name("label")?.as_str().trim();
+    if let Some(caps) = LABEL_ARROW_RE.captures(&masked) {
+        let left_match = caps.name("left")?;
+        let right_match = caps.name("right")?;
+        let label_match = caps.name("label")?;
+        let left = extract(left_match).trim();
+        let right = extract(right_match).trim();
+        let label_raw = extract(label_match).trim();
         let label_clean = label_raw.trim_matches('|').trim();
         if !label_clean.is_empty() && !left.is_empty() && !right.is_empty() {
             let start = caps.name("start").map(|m| m.as_str()).unwrap_or("");
@@ -1521,10 +1604,12 @@ fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMe
         }
     }
 
-    let caps = ARROW_RE.captures(line)?;
-    let left = caps.name("left")?.as_str().trim();
+    let caps = ARROW_RE.captures(&masked)?;
+    let left_match = caps.name("left")?;
+    let right_match = caps.name("right")?;
+    let left = extract(left_match).trim();
     let mut arrow = caps.name("arrow")?.as_str().trim().to_string();
-    let mut right = caps.name("right")?.as_str().trim().to_string();
+    let mut right = extract(right_match).trim().to_string();
 
     if let Some((dec, rest)) = extract_leading_decoration(&right) {
         arrow.push(dec);
