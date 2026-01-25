@@ -14,9 +14,20 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
     let is_sequence = !layout.sequence_footboxes.is_empty();
     let is_state = layout.kind == crate::ir::DiagramKind::State;
     let is_class = layout.kind == crate::ir::DiagramKind::Class;
+    let is_pie = layout.kind == crate::ir::DiagramKind::Pie;
+    let has_links = layout
+        .nodes
+        .values()
+        .any(|node| node.link.is_some())
+        || layout.sequence_footboxes.iter().any(|node| node.link.is_some());
 
     svg.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"{} width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">",
+        if has_links {
+            " xmlns:xlink=\"http://www.w3.org/1999/xlink\""
+        } else {
+            ""
+        }
     ));
 
     svg.push_str(&format!(
@@ -87,6 +98,12 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
         }
     }
     svg.push_str("</defs>");
+
+    if is_pie {
+        svg.push_str(&render_pie(layout, theme, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
 
     for subgraph in &layout.subgraphs {
         let label_empty = subgraph.label.trim().is_empty();
@@ -190,6 +207,39 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                     config,
                     false,
                     Some(label_color),
+                ));
+            }
+        }
+    }
+
+    if is_sequence {
+        for seq_box in &layout.sequence_boxes {
+            let stroke = theme.primary_border_color.as_str();
+            let fill = seq_box
+                .color
+                .as_deref()
+                .unwrap_or("none");
+            let mut fill_attr = format!("fill=\"{}\"", fill);
+            if seq_box.color.is_some() && fill != "none" {
+                fill_attr.push_str(" fill-opacity=\"0.12\"");
+            }
+            svg.push_str(&format!(
+                "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" {fill_attr} stroke=\"{}\" stroke-width=\"1.2\"/>",
+                seq_box.x, seq_box.y, seq_box.width, seq_box.height, stroke
+            ));
+            if let Some(label) = seq_box.label.as_ref() {
+                let pad_x = theme.font_size * 0.8;
+                let pad_y = theme.font_size * 0.9;
+                let label_x = seq_box.x + pad_x;
+                let label_y = seq_box.y + pad_y + label.height / 2.0;
+                svg.push_str(&text_block_svg_anchor(
+                    label_x,
+                    label_y,
+                    label,
+                    theme,
+                    config,
+                    "start",
+                    Some(theme.primary_text_color.as_str()),
                 ));
             }
         }
@@ -300,6 +350,39 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
         ));
     }
 
+    if is_state {
+        for note in &layout.state_notes {
+            let fill = theme.sequence_note_fill.as_str();
+            let stroke = theme.sequence_note_border.as_str();
+            let fold = (theme.font_size * 0.8)
+                .max(8.0)
+                .min(note.width.min(note.height) * 0.3);
+            let x = note.x;
+            let y = note.y;
+            let x2 = note.x + note.width;
+            let y2 = note.y + note.height;
+            let fold_x = x2 - fold;
+            let fold_y = y + fold;
+            svg.push_str(&format!(
+                "<path d=\"M {x:.2} {y:.2} L {fold_x:.2} {y:.2} L {x2:.2} {fold_y:.2} L {x2:.2} {y2:.2} L {x:.2} {y2:.2} Z\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.1\"/>"
+            ));
+            svg.push_str(&format!(
+                "<polyline points=\"{fold_x:.2},{y:.2} {fold_x:.2},{fold_y:.2} {x2:.2},{fold_y:.2}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.0\"/>"
+            ));
+            let center_x = note.x + note.width / 2.0;
+            let center_y = note.y + note.height / 2.0;
+            svg.push_str(&text_block_svg(
+                center_x,
+                center_y,
+                &note.label,
+                theme,
+                config,
+                false,
+                Some(theme.primary_text_color.as_str()),
+            ));
+        }
+    }
+
     if is_sequence {
         for edge in &layout.edges {
             let d = points_to_path(&edge.points);
@@ -378,6 +461,48 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                     "middle",
                 ));
             }
+
+            let end_label_offset = (theme.font_size * 0.6).max(8.0);
+            let label_color = edge
+                .override_style
+                .label_color
+                .as_deref()
+                .unwrap_or(theme.primary_text_color.as_str());
+            if let Some(label) = edge.start_label.as_ref()
+                && let Some((x, y)) = edge_endpoint_label_position(edge, true, end_label_offset)
+            {
+                svg.push_str(&text_block_svg(
+                    x, y, label, theme, config, false, Some(label_color),
+                ));
+            }
+            if let Some(label) = edge.end_label.as_ref()
+                && let Some((x, y)) = edge_endpoint_label_position(edge, false, end_label_offset)
+            {
+                svg.push_str(&text_block_svg(
+                    x, y, label, theme, config, false, Some(label_color),
+                ));
+            }
+        }
+
+        for number in &layout.sequence_numbers {
+            let r = (theme.font_size * 0.45).max(6.0);
+            svg.push_str(&format!(
+                "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"{:.2}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+                number.x,
+                number.y,
+                r,
+                theme.sequence_activation_fill,
+                theme.sequence_activation_border
+            ));
+            let label = number.value.to_string();
+            svg.push_str(&text_line_svg(
+                number.x,
+                number.y + theme.font_size * 0.35,
+                label.as_str(),
+                theme,
+                theme.primary_text_color.as_str(),
+                "middle",
+            ));
         }
 
         for number in &layout.sequence_numbers {
@@ -405,7 +530,9 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
             compute_edge_label_positions(&layout.edges, &layout.nodes, &layout.subgraphs);
 
         let base_edge_width = match layout.kind {
-            crate::ir::DiagramKind::Class | crate::ir::DiagramKind::State => 1.0,
+            crate::ir::DiagramKind::Class
+            | crate::ir::DiagramKind::State
+            | crate::ir::DiagramKind::Er => 1.0,
             _ => 2.0,
         };
         for (idx, edge) in layout.edges.iter().enumerate() {
@@ -526,6 +653,27 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                     edge.override_style.label_color.as_deref(),
                 ));
             }
+
+            let end_label_offset = (theme.font_size * 0.6).max(8.0);
+            let label_color = edge
+                .override_style
+                .label_color
+                .as_deref()
+                .unwrap_or(theme.primary_text_color.as_str());
+            if let Some(label) = edge.start_label.as_ref()
+                && let Some((x, y)) = edge_endpoint_label_position(edge, true, end_label_offset)
+            {
+                svg.push_str(&text_block_svg(
+                    x, y, label, theme, config, false, Some(label_color),
+                ));
+            }
+            if let Some(label) = edge.end_label.as_ref()
+                && let Some((x, y)) = edge_endpoint_label_position(edge, false, end_label_offset)
+            {
+                svg.push_str(&text_block_svg(
+                    x, y, label, theme, config, false, Some(label_color),
+                ));
+            }
         }
     }
 
@@ -536,6 +684,12 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
             }
             if node.anchor_subgraph.is_some() {
                 continue;
+            }
+            if let Some(link) = node.link.as_ref() {
+                svg.push_str(&format!("<a {}>", link_attrs(link)));
+                if let Some(title) = link.title.as_deref() {
+                    svg.push_str(&format!("<title>{}</title>", escape_xml(title)));
+                }
             }
             svg.push_str(&shape_svg(node, theme));
             svg.push_str(&divider_lines_svg(node, theme, config));
@@ -560,9 +714,18 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                 };
                 svg.push_str(&label_svg);
             }
+            if node.link.is_some() {
+                svg.push_str("</a>");
+            }
         }
 
         for footbox in &layout.sequence_footboxes {
+            if let Some(link) = footbox.link.as_ref() {
+                svg.push_str(&format!("<a {}>", link_attrs(link)));
+                if let Some(title) = link.title.as_deref() {
+                    svg.push_str(&format!("<title>{}</title>", escape_xml(title)));
+                }
+            }
             svg.push_str(&shape_svg(footbox, theme));
             svg.push_str(&divider_lines_svg(footbox, theme, config));
             let center_x = footbox.x + footbox.width / 2.0;
@@ -595,6 +758,9 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                 };
                 svg.push_str(&label_svg);
             }
+            if footbox.link.is_some() {
+                svg.push_str("</a>");
+            }
         }
     } else {
         for node in layout.nodes.values() {
@@ -603,6 +769,12 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
             }
             if node.anchor_subgraph.is_some() {
                 continue;
+            }
+            if let Some(link) = node.link.as_ref() {
+                svg.push_str(&format!("<a {}>", link_attrs(link)));
+                if let Some(title) = link.title.as_deref() {
+                    svg.push_str(&format!("<title>{}</title>", escape_xml(title)));
+                }
             }
             svg.push_str(&format!(
                 "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"3\" ry=\"3\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1.0\"/>",
@@ -629,8 +801,17 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                     node.style.text_color.as_deref(),
                 ));
             }
+            if node.link.is_some() {
+                svg.push_str("</a>");
+            }
         }
         for footbox in &layout.sequence_footboxes {
+            if let Some(link) = footbox.link.as_ref() {
+                svg.push_str(&format!("<a {}>", link_attrs(link)));
+                if let Some(title) = link.title.as_deref() {
+                    svg.push_str(&format!("<title>{}</title>", escape_xml(title)));
+                }
+            }
             svg.push_str(&format!(
                 "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"3\" ry=\"3\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1.0\"/>",
                 footbox.x,
@@ -659,6 +840,9 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                     false,
                     footbox.style.text_color.as_deref(),
                 ));
+            }
+            if footbox.link.is_some() {
+                svg.push_str("</a>");
             }
         }
     }
@@ -731,6 +915,92 @@ fn points_to_path(points: &[(f32, f32)]) -> String {
     }
 
     d
+}
+
+fn render_pie(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> String {
+    let mut svg = String::new();
+    let (cx, cy) = layout.pie_center;
+    let radius = layout.pie_radius;
+    if radius <= 0.0 {
+        return svg;
+    }
+
+    for slice in &layout.pie_slices {
+        let span = (slice.end_angle - slice.start_angle).abs();
+        if span <= 0.0001 {
+            continue;
+        }
+        if span >= std::f32::consts::PI * 2.0 - 0.001 {
+            svg.push_str(&format!(
+                "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"{:.2}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+                cx,
+                cy,
+                radius,
+                slice.color,
+                theme.line_color
+            ));
+            continue;
+        }
+        let path = pie_slice_path(cx, cy, radius, slice.start_angle, slice.end_angle);
+        svg.push_str(&format!(
+            "<path d=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+            path, slice.color, theme.line_color
+        ));
+    }
+
+    for item in &layout.pie_legend {
+        let rect_x = item.x - item.marker_size / 2.0;
+        let rect_y = item.y - item.marker_size / 2.0;
+        svg.push_str(&format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+            rect_x,
+            rect_y,
+            item.marker_size,
+            item.marker_size,
+            item.color,
+            theme.line_color
+        ));
+        let label_x = item.x + item.marker_size / 2.0 + theme.font_size * 0.4;
+        svg.push_str(&text_block_svg_anchor(
+            label_x,
+            item.y,
+            &item.label,
+            theme,
+            config,
+            "start",
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    if let Some(title) = &layout.pie_title {
+        svg.push_str(&text_block_svg(
+            title.x,
+            title.y,
+            &title.text,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+
+    svg
+}
+
+fn pie_slice_path(cx: f32, cy: f32, radius: f32, start_angle: f32, end_angle: f32) -> String {
+    let sx = cx + radius * start_angle.cos();
+    let sy = cy + radius * start_angle.sin();
+    let ex = cx + radius * end_angle.cos();
+    let ey = cy + radius * end_angle.sin();
+    let large_arc = if (end_angle - start_angle).abs() > std::f32::consts::PI {
+        1
+    } else {
+        0
+    };
+    let sweep = 1;
+    format!(
+        "M {cx:.2} {cy:.2} L {sx:.2} {sy:.2} A {radius:.2} {radius:.2} 0 {large_arc} {sweep} {ex:.2} {ey:.2} Z"
+    )
 }
 
 fn text_block_svg(
@@ -1184,6 +1454,19 @@ fn escape_xml(input: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+fn link_attrs(link: &crate::ir::NodeLink) -> String {
+    let url = escape_xml(&link.url);
+    let mut attrs = format!("href=\"{}\" xlink:href=\"{}\"", url, url);
+    if let Some(target) = link.target.as_deref() {
+        let target = escape_xml(target);
+        attrs.push_str(&format!(" target=\"{}\"", target));
+        if target == "_blank" {
+            attrs.push_str(" rel=\"noopener noreferrer\"");
+        }
+    }
+    attrs
+}
+
 fn edge_decoration_svg(
     point: (f32, f32),
     angle_deg: f32,
@@ -1243,6 +1526,33 @@ fn edge_endpoint_angle(points: &[(f32, f32)], start: bool) -> f32 {
     dy.atan2(dx).to_degrees()
 }
 
+fn edge_endpoint_label_position(edge: &EdgeLayout, start: bool, offset: f32) -> Option<(f32, f32)> {
+    if edge.points.len() < 2 {
+        return None;
+    }
+    let (p0, p1) = if start {
+        (edge.points[0], edge.points[1])
+    } else {
+        (
+            edge.points[edge.points.len() - 1],
+            edge.points[edge.points.len() - 2],
+        )
+    };
+    let dx = p1.0 - p0.0;
+    let dy = p1.1 - p0.1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= f32::EPSILON {
+        return None;
+    }
+    let dir_x = dx / len;
+    let dir_y = dy / len;
+    let base_x = p0.0 + dir_x * offset * 1.4;
+    let base_y = p0.1 + dir_y * offset * 1.4;
+    let perp_x = -dir_y;
+    let perp_y = dir_x;
+    Some((base_x + perp_x * offset, base_y + perp_y * offset))
+}
+
 #[cfg(feature = "png")]
 fn primary_font(fonts: &str) -> String {
     fonts
@@ -1274,6 +1584,16 @@ fn shape_svg(node: &crate::layout::NodeLayout, theme: &Theme) -> String {
     match node.shape {
         crate::ir::NodeShape::Rectangle => format!(
             "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"0\" ry=\"0\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{dash}{join}/>",
+            x,
+            y,
+            w,
+            h,
+            fill,
+            stroke,
+            node.style.stroke_width.unwrap_or(1.0)
+        ),
+        crate::ir::NodeShape::ForkJoin => format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"2\" ry=\"2\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{dash}{join}/>",
             x,
             y,
             w,
@@ -1598,6 +1918,8 @@ mod tests {
             from: "A".to_string(),
             to: "B".to_string(),
             label: Some("go".to_string()),
+            start_label: None,
+            end_label: None,
             directed: true,
             arrow_start: false,
             arrow_end: true,

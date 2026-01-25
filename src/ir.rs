@@ -14,6 +14,25 @@ pub enum DiagramKind {
     Class,
     State,
     Sequence,
+    Er,
+    Pie,
+    Mindmap,
+    Journey,
+    Timeline,
+    Gantt,
+    Requirement,
+    GitGraph,
+    C4,
+    Sankey,
+    Quadrant,
+    ZenUML,
+    Block,
+    Packet,
+    Kanban,
+    Architecture,
+    Radar,
+    Treemap,
+    XYChart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +42,8 @@ pub enum SequenceFrameKind {
     Loop,
     Par,
     Rect,
+    Critical,
+    Break,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +51,12 @@ pub enum SequenceNotePosition {
     LeftOf,
     RightOf,
     Over,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateNotePosition {
+    LeftOf,
+    RightOf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +78,26 @@ pub struct SequenceNote {
     pub participants: Vec<String>,
     pub label: String,
     pub index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PieSlice {
+    pub label: String,
+    pub value: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SequenceBox {
+    pub label: Option<String>,
+    pub color: Option<String>,
+    pub participants: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateNote {
+    pub position: StateNotePosition,
+    pub target: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone)]
@@ -89,10 +136,19 @@ pub struct Node {
 }
 
 #[derive(Debug, Clone)]
+pub struct NodeLink {
+    pub url: String,
+    pub title: Option<String>,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Edge {
     pub from: String,
     pub to: String,
     pub label: Option<String>,
+    pub start_label: Option<String>,
+    pub end_label: Option<String>,
     pub directed: bool,
     pub arrow_start: bool,
     pub arrow_end: bool,
@@ -145,11 +201,17 @@ pub struct Graph {
     pub sequence_notes: Vec<SequenceNote>,
     pub sequence_activations: Vec<SequenceActivation>,
     pub sequence_autonumber: Option<usize>,
+    pub sequence_boxes: Vec<SequenceBox>,
+    pub state_notes: Vec<StateNote>,
+    pub pie_slices: Vec<PieSlice>,
+    pub pie_title: Option<String>,
+    pub pie_show_data: bool,
     pub class_defs: HashMap<String, NodeStyle>,
     pub node_classes: HashMap<String, Vec<String>>,
     pub node_styles: HashMap<String, NodeStyle>,
     pub subgraph_styles: HashMap<String, NodeStyle>,
     pub subgraph_classes: HashMap<String, Vec<String>>,
+    pub node_links: HashMap<String, NodeLink>,
     pub edge_styles: HashMap<usize, EdgeStyleOverride>,
     pub edge_style_default: Option<EdgeStyleOverride>,
 }
@@ -157,6 +219,7 @@ pub struct Graph {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeShape {
     Rectangle,
+    ForkJoin,
     RoundRect,
     Stadium,
     Subroutine,
@@ -188,11 +251,17 @@ impl Graph {
             sequence_notes: Vec::new(),
             sequence_activations: Vec::new(),
             sequence_autonumber: None,
+            sequence_boxes: Vec::new(),
+            state_notes: Vec::new(),
+            pie_slices: Vec::new(),
+            pie_title: None,
+            pie_show_data: false,
             class_defs: HashMap::new(),
             node_classes: HashMap::new(),
             node_styles: HashMap::new(),
             subgraph_styles: HashMap::new(),
             subgraph_classes: HashMap::new(),
+            node_links: HashMap::new(),
             edge_styles: HashMap::new(),
             edge_style_default: None,
         }

@@ -31,6 +31,82 @@ fn fixture(name: &str) -> &'static str {
             env!("CARGO_MANIFEST_DIR"),
             "/benches/fixtures/sequence_medium.mmd"
         )),
+        "er_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/er_medium.mmd"
+        )),
+        "pie_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/pie_medium.mmd"
+        )),
+        "mindmap_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/mindmap_medium.mmd"
+        )),
+        "journey_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/journey_medium.mmd"
+        )),
+        "timeline_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/timeline_medium.mmd"
+        )),
+        "gantt_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/gantt_medium.mmd"
+        )),
+        "requirement_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/requirement_medium.mmd"
+        )),
+        "gitgraph_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/gitgraph_medium.mmd"
+        )),
+        "c4_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/c4_medium.mmd"
+        )),
+        "sankey_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/sankey_medium.mmd"
+        )),
+        "quadrant_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/quadrant_medium.mmd"
+        )),
+        "zenuml_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/zenuml_medium.mmd"
+        )),
+        "block_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/block_medium.mmd"
+        )),
+        "packet_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/packet_medium.mmd"
+        )),
+        "kanban_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/kanban_medium.mmd"
+        )),
+        "architecture_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/architecture_medium.mmd"
+        )),
+        "radar_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/radar_medium.mmd"
+        )),
+        "treemap_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/treemap_medium.mmd"
+        )),
+        "xychart_medium" => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/benches/fixtures/xychart_medium.mmd"
+        )),
         _ => panic!("unknown fixture"),
     }
 }
@@ -44,6 +120,25 @@ fn bench_parse(c: &mut Criterion) {
         "class_medium",
         "state_medium",
         "sequence_medium",
+        "er_medium",
+        "pie_medium",
+        "mindmap_medium",
+        "journey_medium",
+        "timeline_medium",
+        "gantt_medium",
+        "requirement_medium",
+        "gitgraph_medium",
+        "c4_medium",
+        "sankey_medium",
+        "quadrant_medium",
+        "zenuml_medium",
+        "block_medium",
+        "packet_medium",
+        "kanban_medium",
+        "architecture_medium",
+        "radar_medium",
+        "treemap_medium",
+        "xychart_medium",
     ] {
         let input = fixture(name);
         group.bench_with_input(BenchmarkId::from_parameter(name), input, |b, data| {
@@ -66,6 +161,25 @@ fn bench_layout(c: &mut Criterion) {
         "class_medium",
         "state_medium",
         "sequence_medium",
+        "er_medium",
+        "pie_medium",
+        "mindmap_medium",
+        "journey_medium",
+        "timeline_medium",
+        "gantt_medium",
+        "requirement_medium",
+        "gitgraph_medium",
+        "c4_medium",
+        "sankey_medium",
+        "quadrant_medium",
+        "zenuml_medium",
+        "block_medium",
+        "packet_medium",
+        "kanban_medium",
+        "architecture_medium",
+        "radar_medium",
+        "treemap_medium",
+        "xychart_medium",
     ] {
         let parsed = parse_mermaid(fixture(name)).expect("parse failed");
         group.bench_with_input(
@@ -92,6 +206,25 @@ fn bench_render(c: &mut Criterion) {
         "class_medium",
         "state_medium",
         "sequence_medium",
+        "er_medium",
+        "pie_medium",
+        "mindmap_medium",
+        "journey_medium",
+        "timeline_medium",
+        "gantt_medium",
+        "requirement_medium",
+        "gitgraph_medium",
+        "c4_medium",
+        "sankey_medium",
+        "quadrant_medium",
+        "zenuml_medium",
+        "block_medium",
+        "packet_medium",
+        "kanban_medium",
+        "architecture_medium",
+        "radar_medium",
+        "treemap_medium",
+        "xychart_medium",
     ] {
         let parsed = parse_mermaid(fixture(name)).expect("parse failed");
         let layout = compute_layout(&parsed.graph, &theme, &config);
@@ -115,6 +248,25 @@ fn bench_end_to_end(c: &mut Criterion) {
         "class_medium",
         "state_medium",
         "sequence_medium",
+        "er_medium",
+        "pie_medium",
+        "mindmap_medium",
+        "journey_medium",
+        "timeline_medium",
+        "gantt_medium",
+        "requirement_medium",
+        "gitgraph_medium",
+        "c4_medium",
+        "sankey_medium",
+        "quadrant_medium",
+        "zenuml_medium",
+        "block_medium",
+        "packet_medium",
+        "kanban_medium",
+        "architecture_medium",
+        "radar_medium",
+        "treemap_medium",
+        "xychart_medium",
     ] {
         let input = fixture(name);
         group.bench_with_input(BenchmarkId::from_parameter(name), input, |b, data| {

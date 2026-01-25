@@ -26,6 +26,7 @@ pub struct NodeLayout {
     pub label: TextBlock,
     pub shape: crate::ir::NodeShape,
     pub style: crate::ir::NodeStyle,
+    pub link: Option<crate::ir::NodeLink>,
     pub anchor_subgraph: Option<usize>,
     pub hidden: bool,
 }
@@ -35,6 +36,8 @@ pub struct EdgeLayout {
     pub from: String,
     pub to: String,
     pub label: Option<TextBlock>,
+    pub start_label: Option<TextBlock>,
+    pub end_label: Option<TextBlock>,
     pub points: Vec<(f32, f32)>,
     pub directed: bool,
     pub arrow_start: bool,
@@ -111,6 +114,16 @@ pub struct SequenceFrameLayout {
 }
 
 #[derive(Debug, Clone)]
+pub struct SequenceBoxLayout {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub label: Option<TextBlock>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SequenceNoteLayout {
     pub x: f32,
     pub y: f32,
@@ -120,6 +133,17 @@ pub struct SequenceNoteLayout {
     pub position: crate::ir::SequenceNotePosition,
     pub participants: Vec<String>,
     pub index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateNoteLayout {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub label: TextBlock,
+    pub position: crate::ir::StateNotePosition,
+    pub target: String,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +164,31 @@ pub struct SequenceNumberLayout {
 }
 
 #[derive(Debug, Clone)]
+pub struct PieSliceLayout {
+    pub label: TextBlock,
+    pub value: f32,
+    pub start_angle: f32,
+    pub end_angle: f32,
+    pub color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PieLegendItem {
+    pub x: f32,
+    pub y: f32,
+    pub label: TextBlock,
+    pub color: String,
+    pub marker_size: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PieTitleLayout {
+    pub x: f32,
+    pub y: f32,
+    pub text: TextBlock,
+}
+
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub kind: crate::ir::DiagramKind,
     pub nodes: BTreeMap<String, NodeLayout>,
@@ -147,10 +196,17 @@ pub struct Layout {
     pub subgraphs: Vec<SubgraphLayout>,
     pub lifelines: Vec<Lifeline>,
     pub sequence_footboxes: Vec<NodeLayout>,
+    pub sequence_boxes: Vec<SequenceBoxLayout>,
     pub sequence_frames: Vec<SequenceFrameLayout>,
     pub sequence_notes: Vec<SequenceNoteLayout>,
     pub sequence_activations: Vec<SequenceActivationLayout>,
     pub sequence_numbers: Vec<SequenceNumberLayout>,
+    pub state_notes: Vec<StateNoteLayout>,
+    pub pie_slices: Vec<PieSliceLayout>,
+    pub pie_legend: Vec<PieLegendItem>,
+    pub pie_center: (f32, f32),
+    pub pie_radius: f32,
+    pub pie_title: Option<PieTitleLayout>,
     pub width: f32,
     pub height: f32,
 }
@@ -208,10 +264,167 @@ fn is_region_subgraph(sub: &crate::ir::Subgraph) -> bool {
 
 pub fn compute_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
     match graph.kind {
-        crate::ir::DiagramKind::Sequence => compute_sequence_layout(graph, theme, config),
+        crate::ir::DiagramKind::Sequence | crate::ir::DiagramKind::ZenUML => {
+            compute_sequence_layout(graph, theme, config)
+        }
+        crate::ir::DiagramKind::Pie => compute_pie_layout(graph, theme, config),
         crate::ir::DiagramKind::Class
         | crate::ir::DiagramKind::State
+        | crate::ir::DiagramKind::Er
+        | crate::ir::DiagramKind::Mindmap
+        | crate::ir::DiagramKind::Journey
+        | crate::ir::DiagramKind::Timeline
+        | crate::ir::DiagramKind::Gantt
+        | crate::ir::DiagramKind::Requirement
+        | crate::ir::DiagramKind::GitGraph
+        | crate::ir::DiagramKind::C4
+        | crate::ir::DiagramKind::Sankey
+        | crate::ir::DiagramKind::Quadrant
+        | crate::ir::DiagramKind::Block
+        | crate::ir::DiagramKind::Packet
+        | crate::ir::DiagramKind::Kanban
+        | crate::ir::DiagramKind::Architecture
+        | crate::ir::DiagramKind::Radar
+        | crate::ir::DiagramKind::Treemap
+        | crate::ir::DiagramKind::XYChart
         | crate::ir::DiagramKind::Flowchart => compute_flowchart_layout(graph, theme, config),
+    }
+}
+
+fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
+    let mut slices = Vec::new();
+    let mut legend = Vec::new();
+    let title_block = graph
+        .pie_title
+        .as_ref()
+        .map(|title| measure_label(title, theme, config));
+
+    let palette = pie_palette(theme);
+    let total: f32 = graph
+        .pie_slices
+        .iter()
+        .map(|slice| slice.value.max(0.0))
+        .sum();
+    let fallback_total = graph.pie_slices.len().max(1) as f32;
+    let total = if total > 0.0 { total } else { fallback_total };
+
+    let mut angle = -std::f32::consts::PI / 2.0;
+    for (idx, slice) in graph.pie_slices.iter().enumerate() {
+        let value = slice.value.max(0.0);
+        let span = if total > 0.0 {
+            value / total * std::f32::consts::PI * 2.0
+        } else {
+            std::f32::consts::PI * 2.0 / fallback_total
+        };
+        let label_text = if graph.pie_show_data {
+            format!("{}: {}", slice.label, format_pie_value(value))
+        } else {
+            slice.label.clone()
+        };
+        let label = measure_label(&label_text, theme, config);
+        slices.push(PieSliceLayout {
+            label,
+            value,
+            start_angle: angle,
+            end_angle: angle + span,
+            color: palette[idx % palette.len()].clone(),
+        });
+        angle += span;
+    }
+
+    let marker_size = (theme.font_size * 0.8).max(8.0);
+    let legend_gap = (theme.font_size * 0.6).max(6.0);
+    let mut legend_width: f32 = 0.0;
+    let mut legend_height: f32 = 0.0;
+    for slice in &slices {
+        legend_width = legend_width.max(slice.label.width);
+        legend_height += slice.label.height;
+    }
+    if !slices.is_empty() {
+        legend_height += legend_gap * (slices.len() - 1) as f32;
+    }
+    legend_width += marker_size + theme.font_size * 0.6;
+
+    let title_height = title_block
+        .as_ref()
+        .map(|title| title.height + theme.font_size)
+        .unwrap_or(0.0);
+
+    let mut radius = (theme.font_size * 7.0).max(90.0);
+    if legend_height > 0.0 {
+        radius = radius.max(legend_height / 2.0);
+    }
+    if radius < 20.0 {
+        radius = 20.0;
+    }
+
+    let center_x = radius + theme.font_size * 2.0;
+    let center_y = title_height + radius + theme.font_size * 1.5;
+    let legend_x = center_x + radius + theme.font_size * 1.5;
+    let mut legend_y = center_y - legend_height / 2.0;
+
+    for slice in &slices {
+        let item_y = legend_y + slice.label.height / 2.0;
+        legend.push(PieLegendItem {
+            x: legend_x,
+            y: item_y,
+            label: slice.label.clone(),
+            color: slice.color.clone(),
+            marker_size,
+        });
+        legend_y += slice.label.height + legend_gap;
+    }
+
+    let width = legend_x + legend_width + theme.font_size * 2.0;
+    let height = title_height + radius * 2.0 + theme.font_size * 2.0;
+    let title_layout = title_block.map(|text| PieTitleLayout {
+        x: width / 2.0,
+        y: theme.font_size + text.height / 2.0,
+        text,
+    });
+
+    Layout {
+        kind: graph.kind,
+        nodes: BTreeMap::new(),
+        edges: Vec::new(),
+        subgraphs: Vec::new(),
+        lifelines: Vec::new(),
+        sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
+        sequence_frames: Vec::new(),
+        sequence_notes: Vec::new(),
+        sequence_activations: Vec::new(),
+        sequence_numbers: Vec::new(),
+        state_notes: Vec::new(),
+        pie_slices: slices,
+        pie_legend: legend,
+        pie_center: (center_x, center_y),
+        pie_radius: radius,
+        pie_title: title_layout,
+        width: width.max(200.0),
+        height: height.max(200.0),
+    }
+}
+
+fn pie_palette(theme: &Theme) -> Vec<String> {
+    vec![
+        theme.primary_color.clone(),
+        theme.secondary_color.clone(),
+        theme.tertiary_color.clone(),
+        "#A3D5FF".to_string(),
+        "#FFB6B6".to_string(),
+        "#B9FBC0".to_string(),
+        "#FFD6A5".to_string(),
+        "#CABFFD".to_string(),
+    ]
+}
+
+fn format_pie_value(value: f32) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if (rounded - rounded.round()).abs() < 0.001 {
+        format!("{:.0}", rounded)
+    } else {
+        format!("{:.2}", rounded)
     }
 }
 
@@ -246,6 +459,7 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
                 label,
                 shape: node.shape,
                 style,
+                link: graph.node_links.get(&node.id).cloned(),
                 anchor_subgraph: None,
                 hidden: false,
             },
@@ -468,6 +682,14 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
         let from = temp_from.as_ref().unwrap_or(from_layout);
         let to = temp_to.as_ref().unwrap_or(to_layout);
         let label = edge.label.as_ref().map(|l| measure_label(l, theme, config));
+        let start_label = edge
+            .start_label
+            .as_ref()
+            .map(|l| measure_label(l, theme, config));
+        let end_label = edge
+            .end_label
+            .as_ref()
+            .map(|l| measure_label(l, theme, config));
         let override_style = resolve_edge_style(idx, graph);
 
         let port_info = edge_ports
@@ -493,6 +715,8 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
             from: edge.from.clone(),
             to: edge.to.clone(),
             label,
+            start_label,
+            end_label,
             points,
             directed: edge.directed,
             arrow_start: edge.arrow_start,
@@ -511,7 +735,41 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
     }
 
     normalize_layout(&mut nodes, &mut edges, &mut subgraphs);
-    let (width, height) = bounds_from_layout(&nodes, &subgraphs);
+    let mut state_notes = Vec::new();
+    if graph.kind == crate::ir::DiagramKind::State && !graph.state_notes.is_empty() {
+        let note_pad_x = theme.font_size * 0.75;
+        let note_pad_y = theme.font_size * 0.5;
+        let note_gap = (theme.font_size * 0.9).max(10.0);
+        for note in &graph.state_notes {
+            let Some(target) = nodes.get(&note.target) else {
+                continue;
+            };
+            let label = measure_label(&note.label, theme, config);
+            let width = label.width + note_pad_x * 2.0;
+            let height = label.height + note_pad_y * 2.0;
+            let y = target.y + target.height / 2.0 - height / 2.0;
+            let x = match note.position {
+                crate::ir::StateNotePosition::LeftOf => target.x - note_gap - width,
+                crate::ir::StateNotePosition::RightOf => target.x + target.width + note_gap,
+            };
+            state_notes.push(StateNoteLayout {
+                x,
+                y,
+                width,
+                height,
+                label,
+                position: note.position,
+                target: note.target.clone(),
+            });
+        }
+    }
+    let (mut max_x, mut max_y) = bounds_without_padding(&nodes, &subgraphs);
+    for note in &state_notes {
+        max_x = max_x.max(note.x + note.width);
+        max_y = max_y.max(note.y + note.height);
+    }
+    let width = max_x + 60.0;
+    let height = max_y + 60.0;
 
     Layout {
         kind: graph.kind,
@@ -520,10 +778,17 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
         subgraphs,
         lifelines: Vec::new(),
         sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
         sequence_frames: Vec::new(),
         sequence_notes: Vec::new(),
         sequence_activations: Vec::new(),
         sequence_numbers: Vec::new(),
+        state_notes,
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
         width,
         height,
     }
@@ -834,6 +1099,8 @@ fn assign_positions_manual(
                 from: prev.clone(),
                 to: dummy_id.clone(),
                 label: None,
+                start_label: None,
+                end_label: None,
                 directed: true,
                 arrow_start: false,
                 arrow_end: false,
@@ -849,6 +1116,8 @@ fn assign_positions_manual(
             from: prev,
             to: edge.to.clone(),
             label: None,
+            start_label: None,
+            end_label: None,
             directed: true,
             arrow_start: false,
             arrow_end: false,
@@ -1013,6 +1282,7 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
 
     let mut cursor_x = 0.0;
     for id in &participants {
+        let node = graph.nodes.get(id).expect("participant missing");
         let label = label_blocks.get(id).cloned().unwrap_or_else(|| TextBlock {
             lines: vec![id.clone()],
             width: 0.0,
@@ -1027,8 +1297,9 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
                 width: actor_width,
                 height: actor_height,
                 label,
-                shape: crate::ir::NodeShape::ActorBox,
+                shape: node.shape,
                 style: resolve_node_style(id.as_str(), graph),
+                link: graph.node_links.get(id).cloned(),
                 anchor_subgraph: None,
                 hidden: false,
             },
@@ -1125,6 +1396,14 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         let to = nodes.get(&edge.to).expect("to node missing");
         let y = message_ys.get(idx).copied().unwrap_or(message_cursor);
         let label = edge.label.as_ref().map(|l| measure_label(l, theme, config));
+        let start_label = edge
+            .start_label
+            .as_ref()
+            .map(|l| measure_label(l, theme, config));
+        let end_label = edge
+            .end_label
+            .as_ref()
+            .map(|l| measure_label(l, theme, config));
 
         let points = if edge.from == edge.to {
             let pad = config.node_spacing.max(20.0) * 0.6;
@@ -1144,6 +1423,8 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
             from: edge.from.clone(),
             to: edge.to.clone(),
             label,
+            start_label,
+            end_label,
             points,
             directed: edge.directed,
             arrow_start: edge.arrow_start,
@@ -1228,6 +1509,8 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
                 crate::ir::SequenceFrameKind::Loop => "loop",
                 crate::ir::SequenceFrameKind::Par => "par",
                 crate::ir::SequenceFrameKind::Rect => "rect",
+                crate::ir::SequenceFrameKind::Critical => "critical",
+                crate::ir::SequenceFrameKind::Break => "break",
             };
             let label_block = measure_label(frame_label_text, theme, config);
             let label_box_w =
@@ -1320,6 +1603,44 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         })
         .collect::<Vec<_>>();
 
+    let mut sequence_boxes = Vec::new();
+    if !graph.sequence_boxes.is_empty() {
+        let pad_x = theme.font_size * 0.8;
+        let pad_y = theme.font_size * 0.6;
+        let bottom = sequence_footboxes
+            .iter()
+            .map(|foot| foot.y + foot.height)
+            .fold(lifeline_end, f32::max);
+        for seq_box in &graph.sequence_boxes {
+            let mut min_x = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            for participant in &seq_box.participants {
+                if let Some(node) = nodes.get(participant) {
+                    min_x = min_x.min(node.x);
+                    max_x = max_x.max(node.x + node.width);
+                }
+            }
+            if !min_x.is_finite() || !max_x.is_finite() {
+                continue;
+            }
+            let x = min_x - pad_x;
+            let y = 0.0;
+            let width = (max_x - min_x) + pad_x * 2.0;
+            let height = bottom + pad_y;
+            let label = seq_box
+                .label
+                .as_ref()
+                .map(|text| measure_label(text, theme, config));
+            sequence_boxes.push(SequenceBoxLayout {
+                x,
+                y,
+                width,
+                height,
+                label,
+                color: seq_box.color.clone(),
+            });
+        }
+    }
     let activation_width = (theme.font_size * 0.75).max(10.0);
     let activation_offset = (activation_width * 0.6).max(4.0);
     let activation_end_default = message_ys
@@ -1502,10 +1823,17 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         subgraphs,
         lifelines,
         sequence_footboxes,
+        sequence_boxes,
         sequence_frames,
         sequence_notes,
         sequence_activations,
         sequence_numbers,
+        state_notes: Vec::new(),
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
         width,
         height,
     }
@@ -3499,6 +3827,10 @@ fn shape_size(shape: crate::ir::NodeShape, label: &TextBlock, config: &LayoutCon
             width *= 1.4;
             height *= 1.4;
         }
+        crate::ir::NodeShape::ForkJoin => {
+            width = width.max(50.0);
+            height = (config.node_padding_y * 0.4).max(8.0);
+        }
         crate::ir::NodeShape::Circle | crate::ir::NodeShape::DoubleCircle => {
             let size = if label_empty {
                 (config.node_padding_y * 1.4).max(14.0)
@@ -3560,6 +3892,8 @@ mod tests {
             from: "A".to_string(),
             to: "B".to_string(),
             label: None,
+            start_label: None,
+            end_label: None,
             directed: true,
             arrow_start: false,
             arrow_end: true,
@@ -3584,6 +3918,8 @@ mod tests {
             from: "A".to_string(),
             to: "B".to_string(),
             label: None,
+            start_label: None,
+            end_label: None,
             directed: true,
             arrow_start: false,
             arrow_end: true,
