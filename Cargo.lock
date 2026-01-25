@@ -341,8 +341,8 @@ dependencies = [
 name = "dagre_rust"
 version = "0.0.5"
 dependencies = [
- "graphlib_rust",
- "ordered_hashmap",
+ "graphlib_rust 0.0.2",
+ "ordered_hashmap 0.0.3",
 ]
 
 [[package]]
@@ -450,7 +450,16 @@ version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b47de2c5685b5bb3689d6b0977f38959f3d7d82d3556627cfebbfaa42eda05ea"
 dependencies = [
- "ordered_hashmap",
+ "ordered_hashmap 0.0.3",
+]
+
+[[package]]
+name = "graphlib_rust"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "959ecd8ba8e9350205f9d5cc27395a1d1594cf06ca33c99022fefe8b40167577"
+dependencies = [
+ "ordered_hashmap 0.0.4",
 ]
 
 [[package]]
@@ -597,7 +606,7 @@ dependencies = [
  "clap",
  "criterion",
  "dagre_rust",
- "graphlib_rust",
+ "graphlib_rust 0.0.4",
  "json5",
  "once_cell",
  "regex",
@@ -650,6 +659,12 @@ name = "ordered_hashmap"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb1ea499d242299d564879c8b375c11285f5a26d62d8010768909d6d099c4c5a"
+
+[[package]]
+name = "ordered_hashmap"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77aa85d4b67ec9e48d81de98ac23e7c1c9ab86b77fd075ba79c8f46d3985405f"
 
 [[package]]
 name = "pest"

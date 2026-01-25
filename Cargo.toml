@@ -27,7 +27,7 @@ json5 = "0.4"
 thiserror = "1.0"
 once_cell = "1.19"
 dagre_rust = "0.0.5"
-graphlib_rust = "0.0.2"
+graphlib_rust = "0.0.4"
 resvg = { version = "0.46", optional = true }
 usvg = { version = "0.46", optional = true }
 
