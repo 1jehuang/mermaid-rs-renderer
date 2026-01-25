@@ -3,11 +3,13 @@
     .title { font: bold 18px system-ui, sans-serif; fill: #000; }
     .label { font: bold 14px system-ui, sans-serif; fill: #000; }
     .value { font: bold 11px system-ui, sans-serif; fill: white; }
-    .value-dark { font: bold 11px system-ui, sans-serif; fill: #000; }
-    .axis { font: 12px system-ui, sans-serif; fill: #000; }
+    .speedup { font: bold 14px system-ui, sans-serif; fill: #047857; }
     .bar-mmdr { fill: #10b981; }
     .bar-cli { fill: #f97316; }
-    .speedup { font: bold 14px system-ui, sans-serif; fill: #047857; }
+    @media (prefers-color-scheme: dark) {
+      .title, .label { fill: #e6edf3; }
+      .speedup { fill: #3fb950; }
+    }
   </style>
 
   <text x="300" y="28" text-anchor="middle" class="title">Render Time Comparison (ms)</text>

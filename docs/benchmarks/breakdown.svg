@@ -4,10 +4,17 @@
     .label { font: bold 14px system-ui, sans-serif; fill: #000; }
     .value { font: bold 11px system-ui, sans-serif; fill: white; }
     .axis { font: 12px system-ui, sans-serif; fill: #000; }
+    .legend-text { font: bold 12px system-ui, sans-serif; fill: #000; }
+    .grid { stroke: #d1d5db; }
+    .baseline { stroke: #666; }
     .bar-parse { fill: #10b981; }
     .bar-layout { fill: #3b82f6; }
     .bar-render { fill: #8b5cf6; }
-    .legend-text { font: bold 12px system-ui, sans-serif; fill: #000; }
+    @media (prefers-color-scheme: dark) {
+      .title, .label, .axis, .legend-text { fill: #e6edf3; }
+      .grid { stroke: #30363d; }
+      .baseline { stroke: #8b949e; }
+    }
   </style>
 
   <text x="250" y="28" text-anchor="middle" class="title">mmdr Pipeline Breakdown (ms)</text>
@@ -28,28 +35,20 @@
   <text x="38" y="242" text-anchor="end" class="axis">0</text>
 
   <!-- Grid lines -->
-  <line x1="45" y1="78" x2="460" y2="78" stroke="#d1d5db" stroke-width="1"/>
-  <line x1="45" y1="118" x2="460" y2="118" stroke="#d1d5db" stroke-width="1"/>
-  <line x1="45" y1="158" x2="460" y2="158" stroke="#d1d5db" stroke-width="1"/>
-  <line x1="45" y1="198" x2="460" y2="198" stroke="#d1d5db" stroke-width="1"/>
-  <line x1="45" y1="238" x2="460" y2="238" stroke="#666" stroke-width="1"/>
+  <line x1="45" y1="78" x2="460" y2="78" class="grid" stroke-width="1"/>
+  <line x1="45" y1="118" x2="460" y2="118" class="grid" stroke-width="1"/>
+  <line x1="45" y1="158" x2="460" y2="158" class="grid" stroke-width="1"/>
+  <line x1="45" y1="198" x2="460" y2="198" class="grid" stroke-width="1"/>
+  <line x1="45" y1="238" x2="460" y2="238" class="baseline" stroke-width="1"/>
 
-  <!-- Scale: 133px per 1.0ms, baseline at y=238 -->
-
-  <!-- Flowchart: Parse 1.04, Layout 0.05, Render 0.05 = 1.14 total -->
-  <!-- Parse: 1.04 * 133 = 138px, from 238-138=100 to 238 -->
-  <!-- Layout: 0.05 * 133 = 7px, from 100-7=93 to 100 -->
-  <!-- Render: 0.05 * 133 = 7px, from 93-7=86 to 93 -->
+  <!-- Flowchart: Parse 1.04, Layout 0.05, Render 0.05 -->
   <rect x="55" y="100" width="55" height="138" rx="0" class="bar-parse"/>
   <text x="82" y="175" text-anchor="middle" class="value">1.04</text>
   <rect x="55" y="93" width="55" height="7" rx="0" class="bar-layout"/>
   <rect x="55" y="86" width="55" height="7" rx="3 3 0 0" class="bar-render"/>
   <text x="82" y="258" text-anchor="middle" class="label">Flowchart</text>
 
-  <!-- Class: Parse 0.36, Layout 0.23, Render 0.15 = 0.74 total -->
-  <!-- Parse: 0.36 * 133 = 48px, from 238-48=190 to 238 -->
-  <!-- Layout: 0.23 * 133 = 31px, from 190-31=159 to 190 -->
-  <!-- Render: 0.15 * 133 = 20px, from 159-20=139 to 159 -->
+  <!-- Class: Parse 0.36, Layout 0.23, Render 0.15 -->
   <rect x="155" y="190" width="55" height="48" rx="0" class="bar-parse"/>
   <text x="182" y="218" text-anchor="middle" class="value">0.36</text>
   <rect x="155" y="159" width="55" height="31" rx="0" class="bar-layout"/>
@@ -57,10 +56,7 @@
   <rect x="155" y="139" width="55" height="20" rx="3 3 0 0" class="bar-render"/>
   <text x="182" y="258" text-anchor="middle" class="label">Class</text>
 
-  <!-- State: Parse 0.39, Layout 0.18, Render 0.10 = 0.67 total -->
-  <!-- Parse: 0.39 * 133 = 52px, from 238-52=186 to 238 -->
-  <!-- Layout: 0.18 * 133 = 24px, from 186-24=162 to 186 -->
-  <!-- Render: 0.10 * 133 = 13px, from 162-13=149 to 162 -->
+  <!-- State: Parse 0.39, Layout 0.18, Render 0.10 -->
   <rect x="255" y="186" width="55" height="52" rx="0" class="bar-parse"/>
   <text x="282" y="216" text-anchor="middle" class="value">0.39</text>
   <rect x="255" y="162" width="55" height="24" rx="0" class="bar-layout"/>
@@ -68,10 +64,7 @@
   <rect x="255" y="149" width="55" height="13" rx="3 3 0 0" class="bar-render"/>
   <text x="282" y="258" text-anchor="middle" class="label">State</text>
 
-  <!-- Sequence: Parse 0.37, Layout 0.03, Render 0.07 = 0.47 total -->
-  <!-- Parse: 0.37 * 133 = 49px, from 238-49=189 to 238 -->
-  <!-- Layout: 0.03 * 133 = 4px, from 189-4=185 to 189 -->
-  <!-- Render: 0.07 * 133 = 9px, from 185-9=176 to 185 -->
+  <!-- Sequence: Parse 0.37, Layout 0.03, Render 0.07 -->
   <rect x="355" y="189" width="55" height="49" rx="0" class="bar-parse"/>
   <text x="382" y="218" text-anchor="middle" class="value">0.37</text>
   <rect x="355" y="185" width="55" height="4" rx="0" class="bar-layout"/>
