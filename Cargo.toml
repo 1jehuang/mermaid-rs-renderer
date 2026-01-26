@@ -2,7 +2,7 @@
 name = "mermaid-rs-renderer"
 version = "0.1.1"
 edition = "2024"
-description = "Fast Mermaid renderer in Rust (flowchart/class/state/sequence)"
+description = "Fast Mermaid diagram renderer in pure Rust - 12+ diagram types, no browser required"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/1jehuang/mermaid-rs-renderer"

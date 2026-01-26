@@ -1,7 +1,7 @@
-# Architecture sketch
+# Architecture
 
-## Scope decisions
-- Start with **flowchart** only (subset), then expand to sequence/class/etc.
+## Scope
+- Supports **12+ diagram types**: flowchart, sequence, class, state, ER, pie, gantt, journey, timeline, mindmap, gitGraph, xychart, quadrant.
 - Support Mermaid init directives: `%%{init}%%` + per-diagram config.
 - Deterministic output for stable diffs.
 

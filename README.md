@@ -112,7 +112,14 @@ mmdr -i README.md -o ./diagrams/ -e svg
 
 ## Diagram Types
 
-mmdr supports the four most common Mermaid diagram types:
+mmdr supports **12 Mermaid diagram types**:
+
+| Category | Diagrams |
+|:---------|:---------|
+| **Core** | Flowchart, Sequence, Class, State |
+| **Data** | ER Diagram, Pie Chart, XY Chart, Quadrant Chart |
+| **Planning** | Gantt, Timeline, Journey |
+| **Other** | Mindmap, Git Graph |
 
 <table>
 <tr>
@@ -140,14 +147,16 @@ mmdr supports the four most common Mermaid diagram types:
 <details>
 <summary><strong>Compare with mermaid-cli output</strong></summary>
 
-> **Note:** Visual output is actively being improved.
-
 | Type | mmdr | mermaid-cli |
 |:-----|:----:|:-----------:|
 | Flowchart | <img src="docs/comparisons/flowchart_mmdr.svg" width="350"> | <img src="docs/comparisons/flowchart_official.svg" width="350"> |
 | Class | <img src="docs/comparisons/class_mmdr.svg" width="350"> | <img src="docs/comparisons/class_official.svg" width="350"> |
 | State | <img src="docs/comparisons/state_mmdr.svg" width="350"> | <img src="docs/comparisons/state_official.svg" width="350"> |
 | Sequence | <img src="docs/comparisons/sequence_mmdr.svg" width="350"> | <img src="docs/comparisons/sequence_official.svg" width="350"> |
+| ER Diagram | <img src="docs/comparisons/er_mmdr.svg" width="350"> | <img src="docs/comparisons/er_official.svg" width="350"> |
+| Pie Chart | <img src="docs/comparisons/pie_mmdr.svg" width="350"> | <img src="docs/comparisons/pie_official.svg" width="350"> |
+| Gantt | <img src="docs/comparisons/gantt_mmdr.svg" width="350"> | <img src="docs/comparisons/gantt_official.svg" width="350"> |
+| Mindmap | <img src="docs/comparisons/mindmap_mmdr.svg" width="350"> | <img src="docs/comparisons/mindmap_official.svg" width="350"> |
 
 </details>
 
@@ -237,7 +246,7 @@ Supported:
 
 ## Features
 
-**Diagram types:** `flowchart` / `graph` (TD, TB, LR, RL, BT) | `classDiagram` | `stateDiagram-v2` | `sequenceDiagram`
+**Diagram types:** `flowchart` / `graph` | `sequenceDiagram` | `classDiagram` | `stateDiagram-v2` | `erDiagram` | `pie` | `gantt` | `journey` | `timeline` | `mindmap` | `gitGraph` | `xychart-beta` | `quadrantChart`
 
 **Node shapes:** rectangle, round-rect, stadium, circle, double-circle, diamond, hexagon, cylinder, subroutine, trapezoid, parallelogram, asymmetric
 

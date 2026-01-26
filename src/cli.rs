@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 #[command(
     name = "mmdr",
     version,
-    about = "Mermaid renderer in Rust (flowchart subset)"
+    about = "Fast Mermaid diagram renderer in pure Rust"
 )]
 pub struct Args {
     /// Input file (.mmd) or '-' for stdin
