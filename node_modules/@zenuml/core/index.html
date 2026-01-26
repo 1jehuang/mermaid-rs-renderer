@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /> -->
+    <!-- <link
+      rel="preload stylesheet"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    /> -->
+    <style id="zenumlstyle">
+      /* Custom styles for the diagram */
+    </style>
+    <link
+      rel="stylesheet"
+      href="/vendor/highlightjs/github-dark.min.css"
+    />
+    <script src="/vendor/codemirror/codemirror.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="/vendor/codemirror/codemirror.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="/vendor/codemirror/material-darker.min.css"
+    />
+    <title>ZenUML - Local Development</title>
+    <style>
+      * {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "Roboto",
+          sans-serif;
+      }
+
+      code,
+      .CodeMirror {
+        font-family: "JetBrains Mono", "Monaco", "Consolas", monospace;
+      }
+
+      .CodeMirror {
+        font-size: 14px;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .CodeMirror-scroll {
+        padding: 1rem;
+      }
+
+      .zenuml .CodeMirror .CodeMirror-cursor {
+        border-color: #fff;
+        border-left-width: 2px;
+      }
+
+      .gradient-text {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .editor-shadow {
+        box-shadow:
+          0 20px 25px -5px rgba(0, 0, 0, 0.1),
+          0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      }
+    </style>
+    <script src="/vendor/tailwindcss/tailwindcss.js"></script>
+  </head>
+  <body class="bg-gray-50">
+    <!-- Main Editor Section -->
+    <div class="w-full h-screen p-4">
+      <div class="grid grid-cols-3 gap-4 h-full" id="diagram1">
+        <!-- Editor Panel -->
+        <div
+          class="bg-white rounded-lg shadow-lg editor-shadow overflow-hidden h-full"
+        >
+          <div
+            class="bg-gray-800 text-white px-4 py-3 flex items-center justify-between"
+          >
+            <h3 class="font-medium">Editor</h3>
+            <div class="flex space-x-2">
+              <button
+                onclick="loadExample('basic')"
+                class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+              >
+                Basic
+              </button>
+              <button
+                onclick="loadExample('advanced')"
+                class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+              >
+                Advanced
+              </button>
+              <button
+                onclick="clearEditor()"
+                class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                onclick="exportDiagram()"
+                class="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded transition-colors"
+              >
+                Export PNG
+              </button>
+            </div>
+          </div>
+          <div style="height: calc(100% - 52px)">
+            <textarea id="text" style="display: none"></textarea>
+          </div>
+        </div>
+
+        <!-- Preview Panel -->
+        <div
+          class="bg-white rounded-lg shadow-lg editor-shadow overflow-hidden h-full col-span-2"
+        >
+          <div class="bg-gray-800 text-white px-4 py-3">
+            <h3 class="font-medium">Preview</h3>
+          </div>
+          <div style="height: calc(100% - 52px); overflow: auto" class="p-4">
+            <pre class="zenuml" style="margin: 0"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { waitUntil, debounce } from "./src/utils.ts";
+      import { createConfig } from "./src/config.ts";
+      import { toPng } from "html-to-image";
+
+      const editor = CodeMirror.fromTextArea(document.getElementById("text"), {
+        lineNumbers: true,
+        singleCursorHeightPerLine: false,
+        theme: "material-darker",
+        mode: "text/plain",
+        autofocus: true,
+      });
+
+      const updateDiagram = debounce((content) => {
+        const config = createConfig({
+          onContentChange: (code) => editor.setValue(code),
+        });
+
+        window.zenUml.render(content, config).then((r) => {
+          window.parentLogger
+            .child({ name: "index.html" })
+            .debug("render resolved", r);
+        });
+      }, 500);
+
+      editor.on("change", function (cm) {
+        waitUntil(
+          () => window.zenUml,
+          () => {
+            updateDiagram(cm.getValue());
+            // Save to localStorage
+            localStorage.setItem("zenuml-cm-code", cm.getValue());
+          },
+        );
+      });
+
+      // Example data
+      const examples = {
+        basic: `Alice -> Bob: Hello Bob!
+Bob -> Alice: Hello Alice!`,
+        advanced: `title Online Shopping
+participant Customer
+participant WebApp
+participant PaymentService
+participant Database
+
+Customer -> WebApp: Browse products
+WebApp -> Database: Query products
+Database --> WebApp: Return products
+WebApp --> Customer: Display products
+
+Customer -> WebApp: Add to cart
+WebApp -> Database: Update cart
+Database --> WebApp: Cart updated
+WebApp --> Customer: Show cart
+
+Customer -> WebApp: Checkout
+WebApp -> PaymentService: Process payment
+PaymentService --> WebApp: Payment confirmed
+WebApp -> Database: Create order
+Database --> WebApp: Order created
+WebApp --> Customer: Order confirmation`,
+      };
+
+      // Global functions
+      window.loadExample = function (type) {
+        editor.setValue(examples[type] || examples.basic);
+      };
+
+      window.clearEditor = function () {
+        editor.setValue("");
+      };
+
+      window.exportDiagram = async function () {
+        const element = document.querySelector(".zenuml");
+        if (element) {
+          try {
+            const dataUrl = await toPng(element);
+            const link = document.createElement("a");
+            link.download = "sequence-diagram.png";
+            link.href = dataUrl;
+            link.click();
+          } catch (error) {
+            console.error("Failed to export diagram:", error);
+          }
+        }
+      };
+
+      // Load saved code from localStorage or default example
+      const savedCode = localStorage.getItem("zenuml-cm-code");
+      if (savedCode) {
+        editor.setValue(savedCode);
+      } else {
+        editor.setValue(examples.basic);
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -201,11 +201,12 @@ pub fn inject_edge_label_proxies(g: &mut Graph<GraphConfig, GraphNode, GraphEdge
     if let Some(edge) = edge_ {
       if edge.width.clone().unwrap_or(0.0) > 0.0 && edge.height.clone().unwrap_or(0.0) > 0.0 {
         let v = g.node(&e.v);
-        let w = g.node(&e.v);
+        let w = g.node(&e.w);
         let v_rank = v.cloned().unwrap_or(GraphNode::default()).rank.unwrap_or(0);
         let w_rank = w.cloned().unwrap_or(GraphNode::default()).rank.unwrap_or(0);
         let mut label = GraphNode::default();
         label.rank = Some((w_rank - v_rank) / 2 + v_rank);
+        label.e = Some(e.clone());
         util::add_dummy_node(g, "edge-proxy".to_string(), label, "_ep".to_string());
       }
     }

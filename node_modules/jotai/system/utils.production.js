@@ -1,0 +1,1 @@
+System.register(["jotai/vanilla/utils","jotai/react/utils"],(function(_){"use strict";var u={__proto__:null,default:1};return{setters:[function(r){var i={__proto__:null};for(var t in r)u[t]||(i[t]=r[t]);_(i)},function(r){var i={__proto__:null};for(var t in r)u[t]||(i[t]=r[t]);_(i)}],execute:(function(){})}}));

@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant Client
+  participant API
+  participant DB
+
+  Client->>API: Request
+  activate API
+  API->>DB: Query
+  activate DB
+  DB-->>API: Rows
+  deactivate DB
+  alt success
+    API-->>Client: 200 OK
+  else failure
+    API-->>Client: 500 Error
+  end
+  deactivate API

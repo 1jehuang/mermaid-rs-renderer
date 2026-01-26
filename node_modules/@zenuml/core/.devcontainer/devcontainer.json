@@ -1,0 +1,21 @@
+{
+  "name": "Node.js & Browser Tools",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "none"
+    }
+  },
+  "forwardPorts": [9323],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+  // Add your source code to the container
+  "postCreateCommand": "pnpm install",
+  "remoteUser": "node"
+}

@@ -1,0 +1,1 @@
+import r,{cloneElement as l,isValidElement as c,useState as a}from"react";function f({children:t,freeze:e},o){let n=u(e,t);return c(n)?l(n,{ref:o}):r.createElement(r.Fragment,null,n)}const s=r.forwardRef(f);function u(t,e){let[o,n]=a(e);return!t&&o!==e&&n(e),t?o:e}export{s as Frozen,u as useFrozenData};

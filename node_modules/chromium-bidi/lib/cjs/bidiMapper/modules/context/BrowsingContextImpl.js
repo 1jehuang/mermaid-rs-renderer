@@ -1,0 +1,1300 @@
+"use strict";
+/**
+ * Copyright 2022 Google LLC.
+ * Copyright (c) Microsoft Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+var _a;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BrowsingContextImpl = void 0;
+exports.serializeOrigin = serializeOrigin;
+const protocol_js_1 = require("../../../protocol/protocol.js");
+const assert_js_1 = require("../../../utils/assert.js");
+const Deferred_js_1 = require("../../../utils/Deferred.js");
+const log_js_1 = require("../../../utils/log.js");
+const time_js_1 = require("../../../utils/time.js");
+const unitConversions_js_1 = require("../../../utils/unitConversions.js");
+const WindowRealm_js_1 = require("../script/WindowRealm.js");
+const NavigationTracker_js_1 = require("./NavigationTracker.js");
+class BrowsingContextImpl {
+    static LOGGER_PREFIX = `${log_js_1.LogType.debug}:browsingContext`;
+    /** Direct children browsing contexts. */
+    #children = new Set();
+    /** The ID of this browsing context. */
+    #id;
+    userContext;
+    /**
+     * The ID of the parent browsing context.
+     * If null, this is a top-level context.
+     */
+    #loaderId;
+    #parentId = null;
+    // Keeps track of the previously set viewport.
+    #previousViewport = { width: 0, height: 0 };
+    #originalOpener;
+    #lifecycle = {
+        DOMContentLoaded: new Deferred_js_1.Deferred(),
+        load: new Deferred_js_1.Deferred(),
+    };
+    #cdpTarget;
+    #defaultRealmDeferred = new Deferred_js_1.Deferred();
+    #browsingContextStorage;
+    #eventManager;
+    #logger;
+    #navigationTracker;
+    #realmStorage;
+    // The deferred will be resolved when the default realm is created.
+    #unhandledPromptBehavior;
+    // Set when the user prompt is opened. Required to provide the type in closing event.
+    #lastUserPromptType;
+    constructor(id, parentId, userContext, cdpTarget, eventManager, browsingContextStorage, realmStorage, url, originalOpener, unhandledPromptBehavior, logger) {
+        this.#cdpTarget = cdpTarget;
+        this.#id = id;
+        this.#parentId = parentId;
+        this.userContext = userContext;
+        this.#eventManager = eventManager;
+        this.#browsingContextStorage = browsingContextStorage;
+        this.#realmStorage = realmStorage;
+        this.#unhandledPromptBehavior = unhandledPromptBehavior;
+        this.#logger = logger;
+        this.#originalOpener = originalOpener;
+        this.#navigationTracker = new NavigationTracker_js_1.NavigationTracker(url, id, eventManager, logger);
+    }
+    static create(id, parentId, userContext, cdpTarget, eventManager, browsingContextStorage, realmStorage, url, originalOpener, unhandledPromptBehavior, logger) {
+        const context = new _a(id, parentId, userContext, cdpTarget, eventManager, browsingContextStorage, realmStorage, url, originalOpener, unhandledPromptBehavior, logger);
+        context.#initListeners();
+        browsingContextStorage.addContext(context);
+        if (!context.isTopLevelContext()) {
+            context.parent.addChild(context.id);
+        }
+        // Hold on the `contextCreated` event until the target is unblocked. This is required,
+        // as the parent of the context can be set later in case of reconnecting to an
+        // existing browser instance + OOPiF.
+        eventManager.registerPromiseEvent(context.targetUnblockedOrThrow().then(() => {
+            return {
+                kind: 'success',
+                value: {
+                    type: 'event',
+                    method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.ContextCreated,
+                    params: {
+                        ...context.serializeToBidiValue(),
+                        // Hack to provide the initial URL of the context, as it can be changed
+                        // between the page target is attached and unblocked, as the page is not
+                        // fully paused in MPArch session (https://crbug.com/372842894).
+                        // TODO: remove once https://crbug.com/372842894 is addressed.
+                        url,
+                    },
+                },
+            };
+        }, (error) => {
+            return {
+                kind: 'error',
+                error,
+            };
+        }), context.id, protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.ContextCreated);
+        return context;
+    }
+    /**
+     * @see https://html.spec.whatwg.org/multipage/document-sequences.html#navigable
+     */
+    get navigableId() {
+        return this.#loaderId;
+    }
+    get navigationId() {
+        return this.#navigationTracker.currentNavigationId;
+    }
+    dispose(emitContextDestroyed) {
+        this.#navigationTracker.dispose();
+        this.#deleteAllChildren();
+        this.#realmStorage.deleteRealms({
+            browsingContextId: this.id,
+        });
+        // Delete context from the parent.
+        if (!this.isTopLevelContext()) {
+            this.parent.#children.delete(this.id);
+        }
+        // Fail all ongoing navigations.
+        this.#failLifecycleIfNotFinished();
+        if (emitContextDestroyed) {
+            this.#eventManager.registerEvent({
+                type: 'event',
+                method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.ContextDestroyed,
+                params: this.serializeToBidiValue(),
+            }, this.id);
+        }
+        this.#eventManager.clearBufferedEvents(this.id);
+        this.#browsingContextStorage.deleteContextById(this.id);
+    }
+    /** Returns the ID of this context. */
+    get id() {
+        return this.#id;
+    }
+    /** Returns the parent context ID. */
+    get parentId() {
+        return this.#parentId;
+    }
+    /** Sets the parent context ID and updates parent's children. */
+    set parentId(parentId) {
+        if (this.#parentId !== null) {
+            this.#logger?.(log_js_1.LogType.debugError, 'Parent context already set');
+            // Cannot do anything except logging, as throwing will stop event processing. So
+            // just return,
+            return;
+        }
+        this.#parentId = parentId;
+        if (!this.isTopLevelContext()) {
+            this.parent.addChild(this.id);
+        }
+    }
+    /** Returns the parent context. */
+    get parent() {
+        if (this.parentId === null) {
+            return null;
+        }
+        return this.#browsingContextStorage.getContext(this.parentId);
+    }
+    /** Returns all direct children contexts. */
+    get directChildren() {
+        return [...this.#children].map((id) => this.#browsingContextStorage.getContext(id));
+    }
+    /** Returns all children contexts, flattened. */
+    get allChildren() {
+        const children = this.directChildren;
+        return children.concat(...children.map((child) => child.allChildren));
+    }
+    /**
+     * Returns true if this is a top-level context.
+     * This is the case whenever the parent context ID is null.
+     */
+    isTopLevelContext() {
+        return this.#parentId === null;
+    }
+    get top() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        let topContext = this;
+        let parent = topContext.parent;
+        while (parent) {
+            topContext = parent;
+            parent = topContext.parent;
+        }
+        return topContext;
+    }
+    addChild(childId) {
+        this.#children.add(childId);
+    }
+    #deleteAllChildren(emitContextDestroyed = false) {
+        this.directChildren.map((child) => child.dispose(emitContextDestroyed));
+    }
+    get cdpTarget() {
+        return this.#cdpTarget;
+    }
+    updateCdpTarget(cdpTarget) {
+        this.#cdpTarget = cdpTarget;
+        this.#initListeners();
+    }
+    get url() {
+        return this.#navigationTracker.url;
+    }
+    async lifecycleLoaded() {
+        await this.#lifecycle.load;
+    }
+    async targetUnblockedOrThrow() {
+        const result = await this.#cdpTarget.unblocked;
+        if (result.kind === 'error') {
+            throw result.error;
+        }
+    }
+    async getOrCreateSandbox(sandbox) {
+        if (sandbox === undefined || sandbox === '') {
+            // Default realm is not guaranteed to be created at this point, so return a deferred.
+            return await this.#defaultRealmDeferred;
+        }
+        let maybeSandboxes = this.#realmStorage.findRealms({
+            browsingContextId: this.id,
+            sandbox,
+        });
+        if (maybeSandboxes.length === 0) {
+            await this.#cdpTarget.cdpClient.sendCommand('Page.createIsolatedWorld', {
+                frameId: this.id,
+                worldName: sandbox,
+            });
+            // `Runtime.executionContextCreated` should be emitted by the time the
+            // previous command is done.
+            maybeSandboxes = this.#realmStorage.findRealms({
+                browsingContextId: this.id,
+                sandbox,
+            });
+            (0, assert_js_1.assert)(maybeSandboxes.length !== 0);
+        }
+        // It's possible for more than one sandbox to be created due to provisional
+        // frames. In this case, it's always the first one (i.e. the oldest one)
+        // that is more relevant since the user may have set that one up already
+        // through evaluation.
+        return maybeSandboxes[0];
+    }
+    serializeToBidiValue(maxDepth = 0, addParentField = true) {
+        return {
+            context: this.#id,
+            url: this.url,
+            userContext: this.userContext,
+            originalOpener: this.#originalOpener ?? null,
+            // TODO(#2646): Implement Client Window correctly
+            clientWindow: '',
+            children: maxDepth > 0
+                ? this.directChildren.map((c) => c.serializeToBidiValue(maxDepth - 1, false))
+                : null,
+            ...(addParentField ? { parent: this.#parentId } : {}),
+        };
+    }
+    onTargetInfoChanged(params) {
+        this.#navigationTracker.onTargetInfoChanged(params.targetInfo.url);
+    }
+    #initListeners() {
+        this.#cdpTarget.cdpClient.on('Network.loadingFailed', (params) => {
+            // Detect navigation errors like `net::ERR_BLOCKED_BY_RESPONSE`.
+            // Network related to navigation has request id equals to navigation's loader id.
+            this.#navigationTracker.networkLoadingFailed(params.requestId, params.errorText);
+        });
+        this.#cdpTarget.cdpClient.on('Page.frameNavigated', (params) => {
+            if (this.id !== params.frame.id) {
+                return;
+            }
+            this.#navigationTracker.frameNavigated(params.frame.url + (params.frame.urlFragment ?? ''), params.frame.loaderId, 
+            // `unreachableUrl` indicates if the navigation failed.
+            params.frame.unreachableUrl);
+            // At the point the page is initialized, all the nested iframes from the
+            // previous page are detached and realms are destroyed.
+            // Delete children from context.
+            this.#deleteAllChildren();
+            this.#documentChanged(params.frame.loaderId);
+        });
+        this.#cdpTarget.on("frameStartedNavigating" /* TargetEvents.FrameStartedNavigating */, (params) => {
+            this.#logger?.(log_js_1.LogType.debugInfo, `Received ${"frameStartedNavigating" /* TargetEvents.FrameStartedNavigating */} event`, params);
+            // The frame ID can be either a browsing context id, or not set in case of the frame
+            // is the top-level in the current CDP target.
+            const possibleFrameIds = [
+                this.id,
+                ...(this.cdpTarget.id === this.id ? [undefined] : []),
+            ];
+            if (!possibleFrameIds.includes(params.frameId)) {
+                return;
+            }
+            this.#navigationTracker.frameStartedNavigating(params.url, params.loaderId);
+        });
+        this.#cdpTarget.cdpClient.on('Page.navigatedWithinDocument', (params) => {
+            if (this.id !== params.frameId) {
+                return;
+            }
+            this.#navigationTracker.navigatedWithinDocument(params.url, params.navigationType);
+            if (params.navigationType === 'historyApi') {
+                this.#eventManager.registerEvent({
+                    type: 'event',
+                    method: 'browsingContext.historyUpdated',
+                    params: {
+                        context: this.id,
+                        url: this.#navigationTracker.url,
+                    },
+                }, this.id);
+                return;
+            }
+        });
+        this.#cdpTarget.cdpClient.on('Page.frameRequestedNavigation', (params) => {
+            if (this.id !== params.frameId) {
+                return;
+            }
+            this.#navigationTracker.frameRequestedNavigation(params.url);
+        });
+        this.#cdpTarget.cdpClient.on('Page.lifecycleEvent', (params) => {
+            if (this.id !== params.frameId) {
+                return;
+            }
+            if (params.name === 'init') {
+                this.#documentChanged(params.loaderId);
+                return;
+            }
+            if (params.name === 'commit') {
+                this.#loaderId = params.loaderId;
+                return;
+            }
+            // If mapper attached to the page late, it might miss init and
+            // commit events. In that case, save the first loaderId for this
+            // frameId.
+            if (!this.#loaderId) {
+                this.#loaderId = params.loaderId;
+            }
+            // Ignore event from not current navigation.
+            if (params.loaderId !== this.#loaderId) {
+                return;
+            }
+            switch (params.name) {
+                case 'DOMContentLoaded':
+                    if (!this.#navigationTracker.isInitialNavigation) {
+                        // Do not emit for the initial navigation.
+                        this.#eventManager.registerEvent({
+                            type: 'event',
+                            method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.DomContentLoaded,
+                            params: {
+                                context: this.id,
+                                navigation: this.#navigationTracker.currentNavigationId,
+                                timestamp: (0, time_js_1.getTimestamp)(),
+                                url: this.#navigationTracker.url,
+                            },
+                        }, this.id);
+                    }
+                    this.#lifecycle.DOMContentLoaded.resolve();
+                    break;
+                case 'load':
+                    if (!this.#navigationTracker.isInitialNavigation) {
+                        // Do not emit for the initial navigation.
+                        this.#eventManager.registerEvent({
+                            type: 'event',
+                            method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.Load,
+                            params: {
+                                context: this.id,
+                                navigation: this.#navigationTracker.currentNavigationId,
+                                timestamp: (0, time_js_1.getTimestamp)(),
+                                url: this.#navigationTracker.url,
+                            },
+                        }, this.id);
+                    }
+                    // The initial navigation is finished.
+                    this.#navigationTracker.loadPageEvent(params.loaderId);
+                    this.#lifecycle.load.resolve();
+                    break;
+            }
+        });
+        this.#cdpTarget.cdpClient.on('Runtime.executionContextCreated', (params) => {
+            const { auxData, name, uniqueId, id } = params.context;
+            if (!auxData || auxData.frameId !== this.id) {
+                return;
+            }
+            let origin;
+            let sandbox;
+            // Only these execution contexts are supported for now.
+            switch (auxData.type) {
+                case 'isolated':
+                    sandbox = name;
+                    // Sandbox should have the same origin as the context itself, but in CDP
+                    // it has an empty one.
+                    if (!this.#defaultRealmDeferred.isFinished) {
+                        this.#logger?.(log_js_1.LogType.debugError, 'Unexpectedly, isolated realm created before the default one');
+                    }
+                    origin = this.#defaultRealmDeferred.isFinished
+                        ? this.#defaultRealmDeferred.result.origin
+                        : // This fallback is not expected to be ever reached.
+                            '';
+                    break;
+                case 'default':
+                    origin = serializeOrigin(params.context.origin);
+                    break;
+                default:
+                    return;
+            }
+            const realm = new WindowRealm_js_1.WindowRealm(this.id, this.#browsingContextStorage, this.#cdpTarget.cdpClient, this.#eventManager, id, this.#logger, origin, uniqueId, this.#realmStorage, sandbox);
+            if (auxData.isDefault) {
+                this.#defaultRealmDeferred.resolve(realm);
+                // Initialize ChannelProxy listeners for all the channels of all the
+                // preload scripts related to this BrowsingContext.
+                // TODO: extend for not default realms by the sandbox name.
+                void Promise.all(this.#cdpTarget
+                    .getChannels()
+                    .map((channel) => channel.startListenerFromWindow(realm, this.#eventManager)));
+            }
+        });
+        this.#cdpTarget.cdpClient.on('Runtime.executionContextDestroyed', (params) => {
+            if (this.#defaultRealmDeferred.isFinished &&
+                this.#defaultRealmDeferred.result.executionContextId ===
+                    params.executionContextId) {
+                this.#defaultRealmDeferred = new Deferred_js_1.Deferred();
+            }
+            this.#realmStorage.deleteRealms({
+                cdpSessionId: this.#cdpTarget.cdpSessionId,
+                executionContextId: params.executionContextId,
+            });
+        });
+        this.#cdpTarget.cdpClient.on('Runtime.executionContextsCleared', () => {
+            if (!this.#defaultRealmDeferred.isFinished) {
+                this.#defaultRealmDeferred.reject(new protocol_js_1.UnknownErrorException('execution contexts cleared'));
+            }
+            this.#defaultRealmDeferred = new Deferred_js_1.Deferred();
+            this.#realmStorage.deleteRealms({
+                cdpSessionId: this.#cdpTarget.cdpSessionId,
+            });
+        });
+        this.#cdpTarget.cdpClient.on('Page.javascriptDialogClosed', (params) => {
+            const accepted = params.result;
+            if (this.#lastUserPromptType === undefined) {
+                this.#logger?.(log_js_1.LogType.debugError, 'Unexpectedly no opening prompt event before closing one');
+            }
+            this.#eventManager.registerEvent({
+                type: 'event',
+                method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.UserPromptClosed,
+                params: {
+                    context: this.id,
+                    accepted,
+                    // `lastUserPromptType` should never be undefined here, so fallback to
+                    // `UNKNOWN`. The fallback is required to prevent tests from hanging while
+                    // waiting for the closing event. The cast is required, as the `UNKNOWN` value
+                    // is not standard.
+                    type: this.#lastUserPromptType ??
+                        'UNKNOWN',
+                    userText: accepted && params.userInput ? params.userInput : undefined,
+                },
+            }, this.id);
+            this.#lastUserPromptType = undefined;
+        });
+        this.#cdpTarget.cdpClient.on('Page.javascriptDialogOpening', (params) => {
+            const promptType = _a.#getPromptType(params.type);
+            if (params.type === 'beforeunload') {
+                this.#navigationTracker.beforeunload();
+            }
+            // Set the last prompt type to provide it in closing event.
+            this.#lastUserPromptType = promptType;
+            const promptHandler = this.#getPromptHandler(promptType);
+            this.#eventManager.registerEvent({
+                type: 'event',
+                method: protocol_js_1.ChromiumBidi.BrowsingContext.EventNames.UserPromptOpened,
+                params: {
+                    context: this.id,
+                    handler: promptHandler,
+                    type: promptType,
+                    message: params.message,
+                    ...(params.type === 'prompt'
+                        ? { defaultValue: params.defaultPrompt }
+                        : {}),
+                },
+            }, this.id);
+            switch (promptHandler) {
+                // Based on `unhandledPromptBehavior`, check if the prompt should be handled
+                // automatically (`accept`, `dismiss`) or wait for the user to do it.
+                case "accept" /* Session.UserPromptHandlerType.Accept */:
+                    void this.handleUserPrompt(true);
+                    break;
+                case "dismiss" /* Session.UserPromptHandlerType.Dismiss */:
+                    void this.handleUserPrompt(false);
+                    break;
+                case "ignore" /* Session.UserPromptHandlerType.Ignore */:
+                    break;
+            }
+        });
+    }
+    static #getPromptType(cdpType) {
+        switch (cdpType) {
+            case 'alert':
+                return "alert" /* BrowsingContext.UserPromptType.Alert */;
+            case 'beforeunload':
+                return "beforeunload" /* BrowsingContext.UserPromptType.Beforeunload */;
+            case 'confirm':
+                return "confirm" /* BrowsingContext.UserPromptType.Confirm */;
+            case 'prompt':
+                return "prompt" /* BrowsingContext.UserPromptType.Prompt */;
+        }
+    }
+    #getPromptHandler(promptType) {
+        const defaultPromptHandler = "dismiss" /* Session.UserPromptHandlerType.Dismiss */;
+        switch (promptType) {
+            case "alert" /* BrowsingContext.UserPromptType.Alert */:
+                return (this.#unhandledPromptBehavior?.alert ??
+                    this.#unhandledPromptBehavior?.default ??
+                    defaultPromptHandler);
+            case "beforeunload" /* BrowsingContext.UserPromptType.Beforeunload */:
+                return (this.#unhandledPromptBehavior?.beforeUnload ??
+                    this.#unhandledPromptBehavior?.default ??
+                    "accept" /* Session.UserPromptHandlerType.Accept */);
+            case "confirm" /* BrowsingContext.UserPromptType.Confirm */:
+                return (this.#unhandledPromptBehavior?.confirm ??
+                    this.#unhandledPromptBehavior?.default ??
+                    defaultPromptHandler);
+            case "prompt" /* BrowsingContext.UserPromptType.Prompt */:
+                return (this.#unhandledPromptBehavior?.prompt ??
+                    this.#unhandledPromptBehavior?.default ??
+                    defaultPromptHandler);
+        }
+    }
+    #documentChanged(loaderId) {
+        if (loaderId === undefined || this.#loaderId === loaderId) {
+            return;
+        }
+        // Document changed.
+        this.#resetLifecycleIfFinished();
+        this.#loaderId = loaderId;
+        // Delete all child iframes and notify about top level destruction.
+        this.#deleteAllChildren(true);
+    }
+    #resetLifecycleIfFinished() {
+        if (this.#lifecycle.DOMContentLoaded.isFinished) {
+            this.#lifecycle.DOMContentLoaded = new Deferred_js_1.Deferred();
+        }
+        else {
+            this.#logger?.(_a.LOGGER_PREFIX, 'Document changed (DOMContentLoaded)');
+        }
+        if (this.#lifecycle.load.isFinished) {
+            this.#lifecycle.load = new Deferred_js_1.Deferred();
+        }
+        else {
+            this.#logger?.(_a.LOGGER_PREFIX, 'Document changed (load)');
+        }
+    }
+    #failLifecycleIfNotFinished() {
+        if (!this.#lifecycle.DOMContentLoaded.isFinished) {
+            this.#lifecycle.DOMContentLoaded.reject(new protocol_js_1.UnknownErrorException('navigation canceled'));
+        }
+        if (!this.#lifecycle.load.isFinished) {
+            this.#lifecycle.load.reject(new protocol_js_1.UnknownErrorException('navigation canceled'));
+        }
+    }
+    async navigate(url, wait) {
+        try {
+            new URL(url);
+        }
+        catch {
+            throw new protocol_js_1.InvalidArgumentException(`Invalid URL: ${url}`);
+        }
+        const commandNavigation = this.#navigationTracker.createPendingNavigation(url);
+        // Navigate and wait for the result. If the navigation fails, the error event is
+        // emitted and the promise is rejected.
+        const cdpNavigatePromise = (async () => {
+            const cdpNavigateResult = await this.#cdpTarget.cdpClient.sendCommand('Page.navigate', {
+                url,
+                frameId: this.id,
+            });
+            if (cdpNavigateResult.errorText) {
+                // If navigation failed, no pending navigation is left.
+                this.#navigationTracker.failNavigation(commandNavigation, cdpNavigateResult.errorText);
+                throw new protocol_js_1.UnknownErrorException(cdpNavigateResult.errorText);
+            }
+            this.#navigationTracker.navigationCommandFinished(commandNavigation, cdpNavigateResult.loaderId);
+            this.#documentChanged(cdpNavigateResult.loaderId);
+        })();
+        if (wait === "none" /* BrowsingContext.ReadinessState.None */) {
+            return {
+                navigation: commandNavigation.navigationId,
+                url,
+            };
+        }
+        // Wait for either the navigation is finished or canceled by another navigation.
+        const result = await Promise.race([
+            // No `loaderId` means same-document navigation.
+            this.#waitNavigation(wait, cdpNavigatePromise),
+            // Throw an error if the navigation is canceled.
+            commandNavigation.finished,
+        ]);
+        if (result instanceof NavigationTracker_js_1.NavigationResult) {
+            if (
+            // TODO: check after decision on the spec is done:
+            //  https://github.com/w3c/webdriver-bidi/issues/799.
+            result.eventName === "browsingContext.navigationAborted" /* NavigationEventName.NavigationAborted */ ||
+                result.eventName === "browsingContext.navigationFailed" /* NavigationEventName.NavigationFailed */) {
+                throw new protocol_js_1.UnknownErrorException(result.message ?? 'unknown exception');
+            }
+        }
+        return {
+            navigation: commandNavigation.navigationId,
+            // Url can change due to redirects. Get the one from commandNavigation.
+            url: commandNavigation.url,
+        };
+    }
+    async #waitNavigation(wait, cdpCommandPromise) {
+        switch (wait) {
+            case "none" /* BrowsingContext.ReadinessState.None */:
+                return;
+            case "interactive" /* BrowsingContext.ReadinessState.Interactive */:
+                await cdpCommandPromise;
+                await this.#lifecycle.DOMContentLoaded;
+                return;
+            case "complete" /* BrowsingContext.ReadinessState.Complete */:
+                await cdpCommandPromise;
+                await this.#lifecycle.load;
+                return;
+        }
+    }
+    // TODO: support concurrent navigations analogous to `navigate`.
+    async reload(ignoreCache, wait) {
+        await this.targetUnblockedOrThrow();
+        this.#resetLifecycleIfFinished();
+        const commandNavigation = this.#navigationTracker.createPendingNavigation(this.#navigationTracker.url);
+        const cdpReloadPromise = this.#cdpTarget.cdpClient.sendCommand('Page.reload', {
+            ignoreCache,
+        });
+        // Wait for either the navigation is finished or canceled by another navigation.
+        const result = await Promise.race([
+            // No `loaderId` means same-document navigation.
+            this.#waitNavigation(wait, cdpReloadPromise),
+            // Throw an error if the navigation is canceled.
+            commandNavigation.finished,
+        ]);
+        if (result instanceof NavigationTracker_js_1.NavigationResult) {
+            if (result.eventName === "browsingContext.navigationAborted" /* NavigationEventName.NavigationAborted */ ||
+                result.eventName === "browsingContext.navigationFailed" /* NavigationEventName.NavigationFailed */) {
+                throw new protocol_js_1.UnknownErrorException(result.message ?? 'unknown exception');
+            }
+        }
+        return {
+            navigation: commandNavigation.navigationId,
+            // Url can change due to redirects. Get the one from commandNavigation.
+            url: commandNavigation.url,
+        };
+    }
+    async setViewport(viewport, devicePixelRatio) {
+        if (viewport === null && devicePixelRatio === null) {
+            await this.#cdpTarget.cdpClient.sendCommand('Emulation.clearDeviceMetricsOverride');
+        }
+        else {
+            try {
+                let appliedViewport;
+                if (viewport === undefined) {
+                    appliedViewport = this.#previousViewport;
+                }
+                else if (viewport === null) {
+                    appliedViewport = {
+                        width: 0,
+                        height: 0,
+                    };
+                }
+                else {
+                    appliedViewport = viewport;
+                }
+                this.#previousViewport = appliedViewport;
+                await this.#cdpTarget.cdpClient.sendCommand('Emulation.setDeviceMetricsOverride', {
+                    width: this.#previousViewport.width,
+                    height: this.#previousViewport.height,
+                    deviceScaleFactor: devicePixelRatio ? devicePixelRatio : 0,
+                    mobile: false,
+                    dontSetVisibleSize: true,
+                });
+            }
+            catch (err) {
+                if (err.message.startsWith(
+                // https://crsrc.org/c/content/browser/devtools/protocol/emulation_handler.cc;l=257;drc=2f6eee84cf98d4227e7c41718dd71b82f26d90ff
+                'Width and height values must be positive')) {
+                    throw new protocol_js_1.UnsupportedOperationException('Provided viewport dimensions are not supported');
+                }
+                throw err;
+            }
+        }
+    }
+    async handleUserPrompt(accept, userText) {
+        await this.#cdpTarget.cdpClient.sendCommand('Page.handleJavaScriptDialog', {
+            accept: accept ?? true,
+            promptText: userText,
+        });
+    }
+    async activate() {
+        await this.#cdpTarget.cdpClient.sendCommand('Page.bringToFront');
+    }
+    async captureScreenshot(params) {
+        if (!this.isTopLevelContext()) {
+            throw new protocol_js_1.UnsupportedOperationException(`Non-top-level 'context' (${params.context}) is currently not supported`);
+        }
+        const formatParameters = getImageFormatParameters(params);
+        let captureBeyondViewport = false;
+        let script;
+        params.origin ??= 'viewport';
+        switch (params.origin) {
+            case 'document': {
+                script = String(() => {
+                    const element = document.documentElement;
+                    return {
+                        x: 0,
+                        y: 0,
+                        width: element.scrollWidth,
+                        height: element.scrollHeight,
+                    };
+                });
+                captureBeyondViewport = true;
+                break;
+            }
+            case 'viewport': {
+                script = String(() => {
+                    const viewport = window.visualViewport;
+                    return {
+                        x: viewport.pageLeft,
+                        y: viewport.pageTop,
+                        width: viewport.width,
+                        height: viewport.height,
+                    };
+                });
+                break;
+            }
+        }
+        const realm = await this.getOrCreateSandbox(undefined);
+        const originResult = await realm.callFunction(script, false);
+        (0, assert_js_1.assert)(originResult.type === 'success');
+        const origin = deserializeDOMRect(originResult.result);
+        (0, assert_js_1.assert)(origin);
+        let rect = origin;
+        if (params.clip) {
+            const clip = params.clip;
+            if (params.origin === 'viewport' && clip.type === 'box') {
+                // For viewport origin, the clip is relative to the viewport, while the CDP
+                // screenshot is relative to the document. So correction for the viewport position
+                // is required.
+                clip.x += origin.x;
+                clip.y += origin.y;
+            }
+            rect = getIntersectionRect(await this.#parseRect(clip), origin);
+        }
+        if (rect.width === 0 || rect.height === 0) {
+            throw new protocol_js_1.UnableToCaptureScreenException(`Unable to capture screenshot with zero dimensions: width=${rect.width}, height=${rect.height}`);
+        }
+        return await this.#cdpTarget.cdpClient.sendCommand('Page.captureScreenshot', {
+            clip: { ...rect, scale: 1.0 },
+            ...formatParameters,
+            captureBeyondViewport,
+        });
+    }
+    async print(params) {
+        if (!this.isTopLevelContext()) {
+            throw new protocol_js_1.UnsupportedOperationException('Printing of non-top level contexts is not supported');
+        }
+        const cdpParams = {};
+        if (params.background !== undefined) {
+            cdpParams.printBackground = params.background;
+        }
+        if (params.margin?.bottom !== undefined) {
+            cdpParams.marginBottom = (0, unitConversions_js_1.inchesFromCm)(params.margin.bottom);
+        }
+        if (params.margin?.left !== undefined) {
+            cdpParams.marginLeft = (0, unitConversions_js_1.inchesFromCm)(params.margin.left);
+        }
+        if (params.margin?.right !== undefined) {
+            cdpParams.marginRight = (0, unitConversions_js_1.inchesFromCm)(params.margin.right);
+        }
+        if (params.margin?.top !== undefined) {
+            cdpParams.marginTop = (0, unitConversions_js_1.inchesFromCm)(params.margin.top);
+        }
+        if (params.orientation !== undefined) {
+            cdpParams.landscape = params.orientation === 'landscape';
+        }
+        if (params.page?.height !== undefined) {
+            cdpParams.paperHeight = (0, unitConversions_js_1.inchesFromCm)(params.page.height);
+        }
+        if (params.page?.width !== undefined) {
+            cdpParams.paperWidth = (0, unitConversions_js_1.inchesFromCm)(params.page.width);
+        }
+        if (params.pageRanges !== undefined) {
+            for (const range of params.pageRanges) {
+                if (typeof range === 'number') {
+                    continue;
+                }
+                const rangeParts = range.split('-');
+                if (rangeParts.length < 1 || rangeParts.length > 2) {
+                    throw new protocol_js_1.InvalidArgumentException(`Invalid page range: ${range} is not a valid integer range.`);
+                }
+                if (rangeParts.length === 1) {
+                    void parseInteger(rangeParts[0] ?? '');
+                    continue;
+                }
+                let lowerBound;
+                let upperBound;
+                const [rangeLowerPart = '', rangeUpperPart = ''] = rangeParts;
+                if (rangeLowerPart === '') {
+                    lowerBound = 1;
+                }
+                else {
+                    lowerBound = parseInteger(rangeLowerPart);
+                }
+                if (rangeUpperPart === '') {
+                    upperBound = Number.MAX_SAFE_INTEGER;
+                }
+                else {
+                    upperBound = parseInteger(rangeUpperPart);
+                }
+                if (lowerBound > upperBound) {
+                    throw new protocol_js_1.InvalidArgumentException(`Invalid page range: ${rangeLowerPart} > ${rangeUpperPart}`);
+                }
+            }
+            cdpParams.pageRanges = params.pageRanges.join(',');
+        }
+        if (params.scale !== undefined) {
+            cdpParams.scale = params.scale;
+        }
+        if (params.shrinkToFit !== undefined) {
+            cdpParams.preferCSSPageSize = !params.shrinkToFit;
+        }
+        try {
+            const result = await this.#cdpTarget.cdpClient.sendCommand('Page.printToPDF', cdpParams);
+            return {
+                data: result.data,
+            };
+        }
+        catch (error) {
+            // Effectively zero dimensions.
+            if (error.message ===
+                'invalid print parameters: content area is empty') {
+                throw new protocol_js_1.UnsupportedOperationException(error.message);
+            }
+            throw error;
+        }
+    }
+    /**
+     * See
+     * https://w3c.github.io/webdriver-bidi/#:~:text=If%20command%20parameters%20contains%20%22clip%22%3A
+     */
+    async #parseRect(clip) {
+        switch (clip.type) {
+            case 'box':
+                return { x: clip.x, y: clip.y, width: clip.width, height: clip.height };
+            case 'element': {
+                // TODO: #1213: Use custom sandbox specifically for Chromium BiDi
+                const sandbox = await this.getOrCreateSandbox(undefined);
+                const result = await sandbox.callFunction(String((element) => {
+                    return element instanceof Element;
+                }), false, { type: 'undefined' }, [clip.element]);
+                if (result.type === 'exception') {
+                    throw new protocol_js_1.NoSuchElementException(`Element '${clip.element.sharedId}' was not found`);
+                }
+                (0, assert_js_1.assert)(result.result.type === 'boolean');
+                if (!result.result.value) {
+                    throw new protocol_js_1.NoSuchElementException(`Node '${clip.element.sharedId}' is not an Element`);
+                }
+                {
+                    const result = await sandbox.callFunction(String((element) => {
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            x: rect.x,
+                            y: rect.y,
+                            height: rect.height,
+                            width: rect.width,
+                        };
+                    }), false, { type: 'undefined' }, [clip.element]);
+                    (0, assert_js_1.assert)(result.type === 'success');
+                    const rect = deserializeDOMRect(result.result);
+                    if (!rect) {
+                        throw new protocol_js_1.UnableToCaptureScreenException(`Could not get bounding box for Element '${clip.element.sharedId}'`);
+                    }
+                    return rect;
+                }
+            }
+        }
+    }
+    async close() {
+        await this.#cdpTarget.cdpClient.sendCommand('Page.close');
+    }
+    async traverseHistory(delta) {
+        if (delta === 0) {
+            return;
+        }
+        const history = await this.#cdpTarget.cdpClient.sendCommand('Page.getNavigationHistory');
+        const entry = history.entries[history.currentIndex + delta];
+        if (!entry) {
+            throw new protocol_js_1.NoSuchHistoryEntryException(`No history entry at delta ${delta}`);
+        }
+        await this.#cdpTarget.cdpClient.sendCommand('Page.navigateToHistoryEntry', {
+            entryId: entry.id,
+        });
+    }
+    async toggleModulesIfNeeded() {
+        await Promise.all([
+            this.#cdpTarget.toggleNetworkIfNeeded(),
+            this.#cdpTarget.toggleDeviceAccessIfNeeded(),
+        ]);
+    }
+    async locateNodes(params) {
+        // TODO: create a dedicated sandbox instead of `#defaultRealm`.
+        return await this.#locateNodesByLocator(await this.#defaultRealmDeferred, params.locator, params.startNodes ?? [], params.maxNodeCount, params.serializationOptions);
+    }
+    async #getLocatorDelegate(realm, locator, maxNodeCount, startNodes) {
+        switch (locator.type) {
+            case 'css':
+                return {
+                    functionDeclaration: String((cssSelector, maxNodeCount, ...startNodes) => {
+                        const locateNodesUsingCss = (element) => {
+                            if (!(element instanceof HTMLElement ||
+                                element instanceof Document ||
+                                element instanceof DocumentFragment)) {
+                                throw new Error('startNodes in css selector should be HTMLElement, Document or DocumentFragment');
+                            }
+                            return [...element.querySelectorAll(cssSelector)];
+                        };
+                        startNodes = startNodes.length > 0 ? startNodes : [document];
+                        const returnedNodes = startNodes
+                            .map((startNode) => 
+                        // TODO: stop search early if `maxNodeCount` is reached.
+                        locateNodesUsingCss(startNode))
+                            .flat(1);
+                        return maxNodeCount === 0
+                            ? returnedNodes
+                            : returnedNodes.slice(0, maxNodeCount);
+                    }),
+                    argumentsLocalValues: [
+                        // `cssSelector`
+                        { type: 'string', value: locator.value },
+                        // `maxNodeCount` with `0` means no limit.
+                        { type: 'number', value: maxNodeCount ?? 0 },
+                        // `startNodes`
+                        ...startNodes,
+                    ],
+                };
+            case 'xpath':
+                return {
+                    functionDeclaration: String((xPathSelector, maxNodeCount, ...startNodes) => {
+                        // https://w3c.github.io/webdriver-bidi/#locate-nodes-using-xpath
+                        const evaluator = new XPathEvaluator();
+                        const expression = evaluator.createExpression(xPathSelector);
+                        const locateNodesUsingXpath = (element) => {
+                            const xPathResult = expression.evaluate(element, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE);
+                            const returnedNodes = [];
+                            for (let i = 0; i < xPathResult.snapshotLength; i++) {
+                                returnedNodes.push(xPathResult.snapshotItem(i));
+                            }
+                            return returnedNodes;
+                        };
+                        startNodes = startNodes.length > 0 ? startNodes : [document];
+                        const returnedNodes = startNodes
+                            .map((startNode) => 
+                        // TODO: stop search early if `maxNodeCount` is reached.
+                        locateNodesUsingXpath(startNode))
+                            .flat(1);
+                        return maxNodeCount === 0
+                            ? returnedNodes
+                            : returnedNodes.slice(0, maxNodeCount);
+                    }),
+                    argumentsLocalValues: [
+                        // `xPathSelector`
+                        { type: 'string', value: locator.value },
+                        // `maxNodeCount` with `0` means no limit.
+                        { type: 'number', value: maxNodeCount ?? 0 },
+                        // `startNodes`
+                        ...startNodes,
+                    ],
+                };
+            case 'innerText':
+                // https://w3c.github.io/webdriver-bidi/#locate-nodes-using-inner-text
+                if (locator.value === '') {
+                    throw new protocol_js_1.InvalidSelectorException('innerText locator cannot be empty');
+                }
+                return {
+                    functionDeclaration: String((innerTextSelector, fullMatch, ignoreCase, maxNodeCount, maxDepth, ...startNodes) => {
+                        const searchText = ignoreCase
+                            ? innerTextSelector.toUpperCase()
+                            : innerTextSelector;
+                        const locateNodesUsingInnerText = (node, currentMaxDepth) => {
+                            const returnedNodes = [];
+                            if (node instanceof DocumentFragment ||
+                                node instanceof Document) {
+                                const children = [...node.children];
+                                children.forEach((child) => 
+                                // `currentMaxDepth` is not decremented intentionally according to
+                                // https://github.com/w3c/webdriver-bidi/pull/713.
+                                returnedNodes.push(...locateNodesUsingInnerText(child, currentMaxDepth)));
+                                return returnedNodes;
+                            }
+                            if (!(node instanceof HTMLElement)) {
+                                return [];
+                            }
+                            const element = node;
+                            const nodeInnerText = ignoreCase
+                                ? element.innerText?.toUpperCase()
+                                : element.innerText;
+                            if (!nodeInnerText.includes(searchText)) {
+                                return [];
+                            }
+                            const childNodes = [];
+                            for (const child of element.children) {
+                                if (child instanceof HTMLElement) {
+                                    childNodes.push(child);
+                                }
+                            }
+                            if (childNodes.length === 0) {
+                                if (fullMatch && nodeInnerText === searchText) {
+                                    returnedNodes.push(element);
+                                }
+                                else {
+                                    if (!fullMatch) {
+                                        // Note: `nodeInnerText.includes(searchText)` is already checked
+                                        returnedNodes.push(element);
+                                    }
+                                }
+                            }
+                            else {
+                                const childNodeMatches = 
+                                // Don't search deeper if `maxDepth` is reached.
+                                currentMaxDepth <= 0
+                                    ? []
+                                    : childNodes
+                                        .map((child) => locateNodesUsingInnerText(child, currentMaxDepth - 1))
+                                        .flat(1);
+                                if (childNodeMatches.length === 0) {
+                                    // Note: `nodeInnerText.includes(searchText)` is already checked
+                                    if (!fullMatch || nodeInnerText === searchText) {
+                                        returnedNodes.push(element);
+                                    }
+                                }
+                                else {
+                                    returnedNodes.push(...childNodeMatches);
+                                }
+                            }
+                            // TODO: stop search early if `maxNodeCount` is reached.
+                            return returnedNodes;
+                        };
+                        // TODO: stop search early if `maxNodeCount` is reached.
+                        startNodes = startNodes.length > 0 ? startNodes : [document];
+                        const returnedNodes = startNodes
+                            .map((startNode) => 
+                        // TODO: stop search early if `maxNodeCount` is reached.
+                        locateNodesUsingInnerText(startNode, maxDepth))
+                            .flat(1);
+                        return maxNodeCount === 0
+                            ? returnedNodes
+                            : returnedNodes.slice(0, maxNodeCount);
+                    }),
+                    argumentsLocalValues: [
+                        // `innerTextSelector`
+                        { type: 'string', value: locator.value },
+                        // `fullMatch` with default `true`.
+                        { type: 'boolean', value: locator.matchType !== 'partial' },
+                        // `ignoreCase` with default `false`.
+                        { type: 'boolean', value: locator.ignoreCase === true },
+                        // `maxNodeCount` with `0` means no limit.
+                        { type: 'number', value: maxNodeCount ?? 0 },
+                        // `maxDepth` with default `1000` (same as default full serialization depth).
+                        { type: 'number', value: locator.maxDepth ?? 1000 },
+                        // `startNodes`
+                        ...startNodes,
+                    ],
+                };
+            case 'accessibility': {
+                // https://w3c.github.io/webdriver-bidi/#locate-nodes-using-accessibility-attributes
+                if (!locator.value.name && !locator.value.role) {
+                    throw new protocol_js_1.InvalidSelectorException('Either name or role has to be specified');
+                }
+                // The next two commands cause a11y caches for the target to be
+                // preserved. We probably do not need to disable them if the
+                // client is using a11y features, but we could by calling
+                // Accessibility.disable.
+                await Promise.all([
+                    this.#cdpTarget.cdpClient.sendCommand('Accessibility.enable'),
+                    this.#cdpTarget.cdpClient.sendCommand('Accessibility.getRootAXNode'),
+                ]);
+                const bindings = await realm.evaluate(
+                /* expression=*/ '({getAccessibleName, getAccessibleRole})', 
+                /* awaitPromise=*/ false, "root" /* Script.ResultOwnership.Root */, 
+                /* serializationOptions= */ undefined, 
+                /* userActivation=*/ false, 
+                /* includeCommandLineApi=*/ true);
+                if (bindings.type !== 'success') {
+                    throw new Error('Could not get bindings');
+                }
+                if (bindings.result.type !== 'object') {
+                    throw new Error('Could not get bindings');
+                }
+                return {
+                    functionDeclaration: String((name, role, bindings, maxNodeCount, ...startNodes) => {
+                        const returnedNodes = [];
+                        let aborted = false;
+                        function collect(contextNodes, selector) {
+                            if (aborted) {
+                                return;
+                            }
+                            for (const contextNode of contextNodes) {
+                                let match = true;
+                                if (selector.role) {
+                                    const role = bindings.getAccessibleRole(contextNode);
+                                    if (selector.role !== role) {
+                                        match = false;
+                                    }
+                                }
+                                if (selector.name) {
+                                    const name = bindings.getAccessibleName(contextNode);
+                                    if (selector.name !== name) {
+                                        match = false;
+                                    }
+                                }
+                                if (match) {
+                                    if (maxNodeCount !== 0 &&
+                                        returnedNodes.length === maxNodeCount) {
+                                        aborted = true;
+                                        break;
+                                    }
+                                    returnedNodes.push(contextNode);
+                                }
+                                const childNodes = [];
+                                for (const child of contextNode.children) {
+                                    if (child instanceof HTMLElement) {
+                                        childNodes.push(child);
+                                    }
+                                }
+                                collect(childNodes, selector);
+                            }
+                        }
+                        startNodes =
+                            startNodes.length > 0
+                                ? startNodes
+                                : Array.from(document.documentElement.children).filter((c) => c instanceof HTMLElement);
+                        collect(startNodes, {
+                            role,
+                            name,
+                        });
+                        return returnedNodes;
+                    }),
+                    argumentsLocalValues: [
+                        // `name`
+                        { type: 'string', value: locator.value.name || '' },
+                        // `role`
+                        { type: 'string', value: locator.value.role || '' },
+                        // `bindings`.
+                        { handle: bindings.result.handle },
+                        // `maxNodeCount` with `0` means no limit.
+                        { type: 'number', value: maxNodeCount ?? 0 },
+                        // `startNodes`
+                        ...startNodes,
+                    ],
+                };
+            }
+        }
+    }
+    async #locateNodesByLocator(realm, locator, startNodes, maxNodeCount, serializationOptions) {
+        const locatorDelegate = await this.#getLocatorDelegate(realm, locator, maxNodeCount, startNodes);
+        serializationOptions = {
+            ...serializationOptions,
+            // The returned object is an array of nodes, so no need in deeper JS serialization.
+            maxObjectDepth: 1,
+        };
+        const locatorResult = await realm.callFunction(locatorDelegate.functionDeclaration, false, { type: 'undefined' }, locatorDelegate.argumentsLocalValues, "none" /* Script.ResultOwnership.None */, serializationOptions);
+        if (locatorResult.type !== 'success') {
+            this.#logger?.(_a.LOGGER_PREFIX, 'Failed locateNodesByLocator', locatorResult);
+            // Heuristic to detect invalid selector for different types of selectors.
+            if (
+            // CSS selector.
+            locatorResult.exceptionDetails.text?.endsWith('is not a valid selector.') ||
+                // XPath selector.
+                locatorResult.exceptionDetails.text?.endsWith('is not a valid XPath expression.')) {
+                throw new protocol_js_1.InvalidSelectorException(`Not valid selector ${typeof locator.value === 'string' ? locator.value : JSON.stringify(locator.value)}`);
+            }
+            // Heuristic to detect if the `startNode` is not an `HTMLElement` in css selector.
+            if (locatorResult.exceptionDetails.text ===
+                'Error: startNodes in css selector should be HTMLElement, Document or DocumentFragment') {
+                throw new protocol_js_1.InvalidArgumentException('startNodes in css selector should be HTMLElement, Document or DocumentFragment');
+            }
+            throw new protocol_js_1.UnknownErrorException(`Unexpected error in selector script: ${locatorResult.exceptionDetails.text}`);
+        }
+        if (locatorResult.result.type !== 'array') {
+            throw new protocol_js_1.UnknownErrorException(`Unexpected selector script result type: ${locatorResult.result.type}`);
+        }
+        // Check there are no non-node elements in the result.
+        const nodes = locatorResult.result.value.map((value) => {
+            if (value.type !== 'node') {
+                throw new protocol_js_1.UnknownErrorException(`Unexpected selector script result element: ${value.type}`);
+            }
+            return value;
+        });
+        return { nodes };
+    }
+}
+exports.BrowsingContextImpl = BrowsingContextImpl;
+_a = BrowsingContextImpl;
+function serializeOrigin(origin) {
+    // https://html.spec.whatwg.org/multipage/origin.html#ascii-serialisation-of-an-origin
+    if (['://', ''].includes(origin)) {
+        origin = 'null';
+    }
+    return origin;
+}
+function getImageFormatParameters(params) {
+    const { quality, type } = params.format ?? {
+        type: 'image/png',
+    };
+    switch (type) {
+        case 'image/png': {
+            return { format: 'png' };
+        }
+        case 'image/jpeg': {
+            return {
+                format: 'jpeg',
+                ...(quality === undefined ? {} : { quality: Math.round(quality * 100) }),
+            };
+        }
+        case 'image/webp': {
+            return {
+                format: 'webp',
+                ...(quality === undefined ? {} : { quality: Math.round(quality * 100) }),
+            };
+        }
+    }
+    throw new protocol_js_1.InvalidArgumentException(`Image format '${type}' is not a supported format`);
+}
+function deserializeDOMRect(result) {
+    if (result.type !== 'object' || result.value === undefined) {
+        return;
+    }
+    const x = result.value.find(([key]) => {
+        return key === 'x';
+    })?.[1];
+    const y = result.value.find(([key]) => {
+        return key === 'y';
+    })?.[1];
+    const height = result.value.find(([key]) => {
+        return key === 'height';
+    })?.[1];
+    const width = result.value.find(([key]) => {
+        return key === 'width';
+    })?.[1];
+    if (x?.type !== 'number' ||
+        y?.type !== 'number' ||
+        height?.type !== 'number' ||
+        width?.type !== 'number') {
+        return;
+    }
+    return {
+        x: x.value,
+        y: y.value,
+        width: width.value,
+        height: height.value,
+    };
+}
+/** @see https://w3c.github.io/webdriver-bidi/#normalize-rect */
+function normalizeRect(box) {
+    return {
+        ...(box.width < 0
+            ? {
+                x: box.x + box.width,
+                width: -box.width,
+            }
+            : {
+                x: box.x,
+                width: box.width,
+            }),
+        ...(box.height < 0
+            ? {
+                y: box.y + box.height,
+                height: -box.height,
+            }
+            : {
+                y: box.y,
+                height: box.height,
+            }),
+    };
+}
+/** @see https://w3c.github.io/webdriver-bidi/#rectangle-intersection */
+function getIntersectionRect(first, second) {
+    first = normalizeRect(first);
+    second = normalizeRect(second);
+    const x = Math.max(first.x, second.x);
+    const y = Math.max(first.y, second.y);
+    return {
+        x,
+        y,
+        width: Math.max(Math.min(first.x + first.width, second.x + second.width) - x, 0),
+        height: Math.max(Math.min(first.y + first.height, second.y + second.height) - y, 0),
+    };
+}
+function parseInteger(value) {
+    value = value.trim();
+    if (!/^[0-9]+$/.test(value)) {
+        throw new protocol_js_1.InvalidArgumentException(`Invalid integer: ${value}`);
+    }
+    return parseInt(value);
+}
+//# sourceMappingURL=BrowsingContextImpl.js.map

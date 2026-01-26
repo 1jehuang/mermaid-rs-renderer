@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Integration ZenUML Library with Vanilla JavaScript</title>
+    <script>
+      window.process = { env: "production" };
+    </script>
+    <script src="https://www.unpkg.com/@zenuml/core/dist/zenuml.js"></script>
+  </head>
+  <body class="zenuml">
+    <div id="app"></div>
+    <script>
+      const ZenUml = window["zenuml"].default;
+      const zenuml = new ZenUml(document.getElementById("app"));
+      const code = `
+A B C D
+
+A->B.method() {
+  ret0_assign_rtl =C.method_long_to_give_space {
+    @return C->D: ret1_annotation_ltr
+    ret5_assign_ltr = B.method
+    if(x) {
+      ret0_assign_rtl =C.method_long_to_give_space {
+        @return C->D: ret1_annotation_ltr
+        ret5_assign_ltr = B.method
+      }
+    }
+    B.method2 {
+      return ret2_return_ltr
+    }
+  }
+
+  return ret2_return_rtl
+  @return B->A: ret4_annotation_rtl
+}
+
+`;
+      zenuml.render(code, { theme: "theme-blue" });
+    </script>
+  </body>
+</html>

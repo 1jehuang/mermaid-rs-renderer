@@ -1,0 +1,36 @@
+{
+  "name": "vega-projection",
+  "version": "2.1.0",
+  "description": "Projections for cartographic mapping.",
+  "keywords": [
+    "vega",
+    "geo",
+    "projection"
+  ],
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "author": {
+    "name": "Vega",
+    "url": "https://vega.github.io"
+  },
+  "exports": {
+    "default": "./build/vega-projection.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vega/vega.git"
+  },
+  "scripts": {
+    "prebuild": "del-cli build",
+    "build": "rollup -c rollup.config.js",
+    "pretest": "npm run build -- --config-test",
+    "test": "tape 'test/**/*-test.js'",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "d3-geo-projection": "^4.0.0",
+    "vega-scale": "^8.1.0"
+  },
+  "gitHead": "4dea72921d25bf6ff6636a9f9cb6c63ff696932c"
+}

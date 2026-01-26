@@ -1,0 +1,14 @@
+requirementDiagram
+  requirement req1 {
+    id: 1
+    text: Login
+    risk: medium
+    verifymethod: test
+  }
+  requirement req2 {
+    id: 2
+    text: Session
+    risk: low
+    verifymethod: inspection
+  }
+  req1 - satisfies -> req2

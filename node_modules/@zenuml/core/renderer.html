@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en" style="height: 100%; width: 100%">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>ZenUML Web Renderer</title>
+    <meta name="description" content="ZenUML Web Renderer - Render sequence diagrams from URL parameters" />
+    <meta name="keywords" content="zenuml, sequence diagram, uml, renderer, web" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload stylesheet"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@300;400;500;700&display=swap"
+    />
+    
+    <!-- Basic styles for the renderer -->
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Roboto Slab', serif, system-ui, -apple-system, sans-serif;
+        background-color: white;
+        height: 100vh;
+        width: 100vw;
+        overflow: auto;
+      }
+      
+      .zenuml {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: auto;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ZenUML diagram container -->
+    <pre class="zenuml" id="zenuml-diagram"></pre>
+
+    <!-- Initialize the renderer -->
+    <script type="module">
+      import pako from 'pako';
+      // ZenUML Web Renderer initialization
+      console.log('ZenUML Web Renderer initializing...');
+      
+      // Default empty ZenUML code to display when no URL parameters are provided
+      const DEFAULT_ZENUML_CODE = `title ZenUML Web Renderer
+A.method() {
+  B.process()
+  return result
+}`;
+
+      // URL parameter extraction functionality
+      function extractCodeFromURL() {
+        try {
+          console.log('Extracting code parameter from URL...');
+          
+          // Get current URL
+          const currentUrl = new URL(window.location.href);
+          console.log('Current URL:', currentUrl.href);
+          
+          // Extract the 'code' parameter
+          const codeParam = currentUrl.searchParams.get('code');
+          
+          if (codeParam) {
+            console.log('Code parameter found:', codeParam.substring(0, 50) + '...');
+            return codeParam;
+          } else {
+            console.log('No code parameter found in URL');
+            return null;
+          }
+        } catch (error) {
+          console.error('Error extracting code from URL:', error);
+          return null;
+        }
+      }
+
+      // Check if URL parameter exists
+      function hasCodeParameter() {
+        try {
+          const currentUrl = new URL(window.location.href);
+          return currentUrl.searchParams.has('code');
+        } catch (error) {
+          console.error('Error checking for code parameter:', error);
+          return false;
+        }
+      }
+
+      // Base64 decoding functionality
+      function decodeBase64(encodedString) {
+        try {
+          console.log('Attempting to decode Base64 string...');
+          
+          // Check if the string is valid Base64
+          if (!encodedString || typeof encodedString !== 'string') {
+            throw new Error('Invalid input: string is null, undefined, or not a string');
+          }
+          
+          // Remove any whitespace
+          const cleanedString = encodedString.trim();
+          
+          // Check if string looks like Base64 (basic validation)
+          const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+          if (!base64Regex.test(cleanedString)) {
+            throw new Error('Invalid Base64 format');
+          }
+          
+          // Attempt to decode
+          const decodedString = atob(cleanedString);
+          console.log('Base64 decoding successful');
+          
+          return decodedString;
+        } catch (error) {
+          console.error('Base64 decoding failed:', error);
+          throw new Error(`Base64 decoding failed: ${error.message}`);
+        }
+      }
+
+      // Gzip decompression functionality
+      function decompressGzip(compressedData) {
+        try {
+          console.log('Attempting to decompress gzip data...');
+          
+          // Convert base64 decoded string to Uint8Array
+          const binaryString = compressedData;
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          
+          // Decompress using pako
+          const decompressed = pako.ungzip(bytes, { to: 'string' });
+          console.log('Gzip decompression successful');
+          
+          return decompressed;
+        } catch (error) {
+          console.error('Gzip decompression failed:', error);
+          throw new Error(`Gzip decompression failed: ${error.message}`);
+        }
+      }
+
+      // Process URL code parameter with Base64 decoding and optional gzip decompression
+      function processURLCodeParameter(encodedCode) {
+        try {
+          console.log('Processing URL code parameter...');
+          
+          if (!encodedCode) {
+            console.log('No encoded code provided');
+            return null;
+          }
+          
+          let processedCode = encodedCode;
+          
+          // Step 1: Try to decode as Base64
+          try {
+            const base64Decoded = decodeBase64(encodedCode);
+            console.log('Base64 decoding successful');
+            processedCode = base64Decoded;
+            
+            // Step 2: Check if the decoded data is gzipped and decompress if needed
+            // Gzip files start with magic numbers: 1f 8b
+            if (processedCode.length >= 2 && 
+                processedCode.charCodeAt(0) === 0x1f && 
+                processedCode.charCodeAt(1) === 0x8b) {
+              console.log('Gzip signature detected, attempting decompression...');
+              processedCode = decompressGzip(processedCode);
+              console.log('Successfully decompressed gzipped data');
+            } else {
+              console.log('No gzip signature found, using Base64 decoded data');
+            }
+          } catch (base64Error) {
+            console.warn('Base64 decoding failed, trying direct gzip decompression:', base64Error);
+            
+            // If Base64 fails, maybe it's already raw text or needs different handling
+            // Try to see if it's URL encoded
+            try {
+              const urlDecoded = decodeURIComponent(encodedCode);
+              if (urlDecoded !== encodedCode) {
+                console.log('URL decoding applied');
+                processedCode = urlDecoded;
+              }
+            } catch (urlError) {
+              console.warn('URL decoding failed:', urlError);
+            }
+          }
+          
+          return processedCode;
+        } catch (error) {
+          console.error('Failed to process URL code parameter:', error);
+          
+          // Return the original code as fallback (might be plain text)
+          console.log('All decoding attempts failed, using raw parameter value');
+          return encodedCode;
+        }
+      }
+
+      // Initialize the renderer
+      async function initRenderer() {
+        try {
+          console.log('Waiting for ZenUML core to load...');
+          
+          // Wait for ZenUML to be available
+          await waitForZenUML();
+          
+          console.log('ZenUML core loaded successfully');
+          
+          // Get the ZenUML instance that was created by main.ts
+          const zenUmlInstance = window.zenUml;
+          
+          if (!zenUmlInstance) {
+            throw new Error('ZenUML instance not found');
+          }
+          
+          // Verify ZenUML version
+          console.log('ZenUML Version:', window.ZENUML_VERSION);
+          
+          // Extract and process code from URL parameters
+          const urlCodeParam = extractCodeFromURL();
+          let codeToRender = DEFAULT_ZENUML_CODE;
+          
+          if (urlCodeParam) {
+            console.log('URL code parameter detected, processing...');
+            
+            try {
+              // Process the URL code parameter (includes Base64 decoding)
+              const processedCode = processURLCodeParameter(urlCodeParam);
+              
+              if (processedCode) {
+                codeToRender = processedCode;
+                addStatusIndicator('success', 'Code decoded and ready to render');
+              } else {
+                console.log('Processed code is empty, using default diagram');
+                addStatusIndicator('warning', 'Empty code parameter, using default');
+              }
+            } catch (error) {
+              console.error('Failed to process URL code parameter:', error);
+              addStatusIndicator('error', 'Failed to decode code parameter');
+              // Keep using default code
+            }
+          } else {
+            console.log('No URL code parameter, using default diagram');
+            addStatusIndicator('info', 'Using default diagram');
+          }
+          
+          // Render the diagram
+          console.log('Rendering diagram...');
+          await zenUmlInstance.render(codeToRender);
+          
+          console.log('Diagram rendered successfully');
+          
+          console.log('ZenUML Web Renderer initialized successfully');
+          
+          // Add success indicator to the page
+          addStatusIndicator('success', 'ZenUML Web Renderer Ready');
+          
+        } catch (error) {
+          console.error('Failed to initialize renderer:', error);
+          addStatusIndicator('error', `Initialization failed: ${error.message}`);
+          
+          // Show error in the diagram container
+          const diagramContainer = document.getElementById('zenuml-diagram');
+          if (diagramContainer) {
+            diagramContainer.innerHTML = `
+              <div style="padding: 20px; color: #dc2626; text-align: center;">
+                <h3>ZenUML Renderer Error</h3>
+                <p>Failed to initialize: ${error.message}</p>
+                <button onclick="location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                  Retry
+                </button>
+              </div>
+            `;
+          }
+        }
+      }
+      
+      // Wait for ZenUML to be available with timeout
+      function waitForZenUML(timeout = 10000) {
+        return new Promise((resolve, reject) => {
+          const startTime = Date.now();
+          
+          const checkZenUml = () => {
+            if (typeof window.zenUml !== 'undefined') {
+              resolve();
+            } else if (Date.now() - startTime > timeout) {
+              reject(new Error('ZenUML loading timeout'));
+            } else {
+              setTimeout(checkZenUml, 100);
+            }
+          };
+          
+          checkZenUml();
+        });
+      }
+      
+      // Add status indicator to show initialization status
+      function addStatusIndicator(type, message) {
+        const indicator = document.createElement('div');
+        indicator.id = 'status-indicator';
+        
+        let backgroundColor;
+        switch (type) {
+          case 'success':
+            backgroundColor = '#10b981';
+            break;
+          case 'error':
+            backgroundColor = '#dc2626';
+            break;
+          case 'info':
+            backgroundColor = '#3b82f6';
+            break;
+          case 'warning':
+            backgroundColor = '#f59e0b';
+            break;
+          default:
+            backgroundColor = '#6b7280';
+        }
+        
+        indicator.style.cssText = `
+          position: fixed;
+          top: 10px;
+          right: 10px;
+          padding: 8px 12px;
+          border-radius: 4px;
+          font-size: 12px;
+          font-weight: 500;
+          z-index: 1000;
+          background: ${backgroundColor};
+          color: white;
+        `;
+        indicator.textContent = message;
+        document.body.appendChild(indicator);
+        
+        // Auto-hide success and info messages after 3 seconds
+        if (type === 'success' || type === 'info') {
+          setTimeout(() => {
+            if (indicator.parentNode) {
+              indicator.parentNode.removeChild(indicator);
+            }
+          }, 3000);
+        }
+      }
+      
+      // Start initialization when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initRenderer);
+      } else {
+        initRenderer();
+      }
+    </script>
+    
+    <!-- Load ZenUML core -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

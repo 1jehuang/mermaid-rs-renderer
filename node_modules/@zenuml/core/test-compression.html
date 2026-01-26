@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZenUML Compression Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    textarea {
+      width: 100%;
+      height: 200px;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .output {
+      background: #f4f4f4;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      word-break: break-all;
+    }
+    .error {
+      color: red;
+      background: #fee;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+    .success {
+      color: green;
+      background: #efe;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>ZenUML Compression Test</h1>
+
+  <h2>Test URL Parameter Encoding/Decoding</h2>
+  <textarea id="zenUmlCode" placeholder="Enter ZenUML code here...">title Authentication Flow
+  RET ret = A.methodA() {
+  B.method() {
+    if (X) {
+      C.methodC() {
+        a = A.methodA() {
+          D.method()
+        }
+      }
+    }
+    while (Y) {
+      C.methodC() {
+        A.methodA()
+      }
+    }
+   }
+ }
+  </textarea>
+
+  <div>
+    <button onclick="encodeAndCompress()">Encode (Gzip + Base64)</button>
+    <button onclick="testDecode()">Test Decode</button>
+    <button onclick="generateUrl()">Generate URL</button>
+    <button onclick="clearAll()">Clear</button>
+  </div>
+
+  <h3>Encoded Output:</h3>
+  <div id="encodedOutput" class="output"></div>
+
+  <h3>URL:</h3>
+  <div id="urlOutput" class="output"></div>
+
+  <h3>Test Results:</h3>
+  <div id="testResults"></div>
+
+  <script type="module">
+    import pako from 'pako';
+    
+    // Helper function to escape HTML special characters
+    function escapeHtml(unsafe) {
+      return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+    
+    // Compression and encoding functions
+    function compressAndEncode(text) {
+      try {
+        // Step 1: Compress with gzip
+        const compressed = pako.gzip(text);
+
+        // Step 2: Convert to base64
+        let binary = '';
+        const bytes = new Uint8Array(compressed);
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+
+        return base64;
+      } catch (error) {
+        console.error('Compression error:', error);
+        throw error;
+      }
+    }
+
+    // Decompression and decoding functions
+    function decodeAndDecompress(base64String) {
+      try {
+        // Step 1: Decode base64
+        const binaryString = atob(base64String);
+
+        // Step 2: Convert to Uint8Array
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Step 3: Decompress
+        const decompressed = pako.ungzip(bytes, { to: 'string' });
+
+        return decompressed;
+      } catch (error) {
+        console.error('Decompression error:', error);
+        throw error;
+      }
+    }
+
+    function encodeAndCompress() {
+      const zenUmlCode = document.getElementById('zenUmlCode').value;
+      const resultsDiv = document.getElementById('testResults');
+      resultsDiv.innerHTML = '';
+
+      try {
+        const encoded = compressAndEncode(zenUmlCode);
+        document.getElementById('encodedOutput').textContent = encoded;
+
+        // Show compression ratio
+        const originalSize = new Blob([zenUmlCode]).size;
+        const compressedSize = new Blob([encoded]).size;
+        const ratio = ((originalSize - compressedSize) / originalSize * 100).toFixed(2);
+
+        resultsDiv.innerHTML = `
+          <div class="success">
+            Encoding successful!<br>
+            Original size: ${originalSize} bytes<br>
+            Encoded size: ${compressedSize} bytes<br>
+            Compression: ${ratio}% smaller
+          </div>
+        `;
+      } catch (error) {
+        resultsDiv.innerHTML = `<div class="error">Encoding failed: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function testDecode() {
+      const encoded = document.getElementById('encodedOutput').textContent;
+      const resultsDiv = document.getElementById('testResults');
+
+      if (!encoded) {
+        resultsDiv.innerHTML = '<div class="error">No encoded data to decode. Please encode first.</div>';
+        return;
+      }
+
+      try {
+        const decoded = decodeAndDecompress(encoded);
+        const original = document.getElementById('zenUmlCode').value;
+
+        if (decoded === original) {
+          resultsDiv.innerHTML = `
+            <div class="success">
+              Decoding successful! The decoded content matches the original.<br>
+              <pre>${decoded}</pre>
+            </div>
+          `;
+        } else {
+          resultsDiv.innerHTML = `
+            <div class="error">
+              Decoding mismatch!<br>
+              Original length: ${original.length}<br>
+              Decoded length: ${decoded.length}
+            </div>
+          `;
+        }
+      } catch (error) {
+        resultsDiv.innerHTML = `<div class="error">Decoding failed: ${error.message}</div>`;
+      }
+    }
+
+    function generateUrl() {
+      const encoded = document.getElementById('encodedOutput').textContent;
+
+      if (!encoded) {
+        document.getElementById('urlOutput').innerHTML = '<span style="color: red;">Please encode first</span>';
+        return;
+      }
+
+      const baseUrl = window.location.origin + '/renderer.html';
+      const url = `${baseUrl}?code=${encodeURIComponent(encoded)}`;
+
+      document.getElementById('urlOutput').innerHTML = `
+        <a href="${url}" target="_blank">${url}</a><br>
+        <small>URL length: ${url.length} characters</small>
+      `;
+    }
+
+    function clearAll() {
+      document.getElementById('zenUmlCode').value = '';
+      document.getElementById('encodedOutput').textContent = '';
+      document.getElementById('urlOutput').textContent = '';
+      document.getElementById('testResults').innerHTML = '';
+    }
+
+    // Test some edge cases
+    function runTests() {
+      const testCases = [
+        { name: 'Empty string', input: '' },
+        { name: 'Simple text', input: 'Hello World' },
+        { name: 'Unicode', input: '你好世界 🌍' },
+        { name: 'Special characters', input: '!@#$%^&*()_+-=[]{}|;:,.<>?' }
+      ];
+
+      let results = '<h3>Automated Tests:</h3>';
+
+      for (const test of testCases) {
+        try {
+          const encoded = compressAndEncode(test.input);
+          const decoded = decodeAndDecompress(encoded);
+
+          if (decoded === test.input) {
+            results += `<div class="success">✓ ${test.name}: PASSED</div>`;
+          } else {
+            results += `<div class="error">✗ ${test.name}: FAILED - Mismatch</div>`;
+          }
+        } catch (error) {
+          results += `<div class="error">✗ ${test.name}: ERROR - ${error.message}</div>`;
+        }
+      }
+
+      document.getElementById('testResults').innerHTML = results;
+    }
+
+    // Make functions available globally for onclick handlers
+    window.encodeAndCompress = encodeAndCompress;
+    window.testDecode = testDecode;
+    window.generateUrl = generateUrl;
+    window.clearAll = clearAll;
+    
+    // Run tests on page load
+    runTests();
+  </script>
+</body>
+</html>

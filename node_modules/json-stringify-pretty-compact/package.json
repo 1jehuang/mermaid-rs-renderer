@@ -1,0 +1,34 @@
+{
+  "name": "json-stringify-pretty-compact",
+  "version": "4.0.0",
+  "author": "Simon Lydell",
+  "license": "MIT",
+  "description": "The best of both `JSON.stringify(obj)` and `JSON.stringify(obj, null, indent)`.",
+  "type": "module",
+  "exports": "./index.js",
+  "types": "index.d.ts",
+  "repository": "lydell/json-stringify-pretty-compact",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "keywords": [
+    "JSON",
+    "stringify",
+    "pretty",
+    "print",
+    "pretty-print",
+    "compact",
+    "indent",
+    "format",
+    "formatter"
+  ],
+  "scripts": {
+    "test": "eslint . --report-unused-disable-directives && prettier --check . && node --test",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "eslint": "8.15.0",
+    "prettier": "2.6.2"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "vega-canvas",
+  "version": "2.0.0",
+  "description": "Canvas and Image utilities.",
+  "keywords": [
+    "vega",
+    "canvas",
+    "image"
+  ],
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "author": {
+    "name": "Vega",
+    "url": "https://vega.github.io"
+  },
+  "exports": {
+    "node": "./build/vega-canvas.node.js",
+    "default": "./build/vega-canvas.browser.js"
+  },
+  "repository": "vega/vega",
+  "scripts": {
+    "prebuild": "del-cli build",
+    "build": "rollup -c rollup.config.js",
+    "pretest": "yarn build --config-test",
+    "test": "tape 'test/**/*-test.js'",
+    "prepublishOnly": "yarn test && yarn build"
+  },
+  "gitHead": "45ce7657f6212c448be409887018b693a8103fd4"
+}

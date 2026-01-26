@@ -1,0 +1,23 @@
+{
+  "name": "Session Sound Notification",
+  "description": "Plays a sound when a session ends or user input is needed",
+  "triggers": [
+    {
+      "event": "session.end",
+      "description": "Triggered when an AI session completes"
+    },
+    {
+      "event": "user.input.required",
+      "description": "Triggered when the AI needs user input to continue"
+    }
+  ],
+  "actions": [
+    {
+      "type": "system.sound",
+      "sound": "notification",
+      "description": "Play system notification sound"
+    }
+  ],
+  "enabled": true,
+  "autoExecute": true
+}

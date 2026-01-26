@@ -1,0 +1,1 @@
+import{useMemo as o}from"react";import{getOwnerDocument as t,getRootNode as r}from'../utils/owner.js';function u(...e){return o(()=>t(...e),[...e])}function c(...e){return o(()=>r(...e),[...e])}export{u as useOwnerDocument,c as useRootDocument};

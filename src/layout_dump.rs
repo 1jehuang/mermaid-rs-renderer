@@ -19,10 +19,14 @@ pub struct LayoutDump {
 #[derive(Debug, Serialize)]
 pub struct NodeDump {
     pub id: String,
+    pub shape: String,
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub label_width: f32,
+    pub label_height: f32,
+    pub label_lines: Vec<String>,
     pub anchor_subgraph: Option<usize>,
     pub hidden: bool,
 }
@@ -56,10 +60,14 @@ impl LayoutDump {
             .values()
             .map(|node| NodeDump {
                 id: node.id.clone(),
+                shape: format!("{:?}", node.shape),
                 x: node.x,
                 y: node.y,
                 width: node.width,
                 height: node.height,
+                label_width: node.label.width,
+                label_height: node.label.height,
+                label_lines: node.label.lines.clone(),
                 anchor_subgraph: node.anchor_subgraph,
                 hidden: node.hidden,
             })

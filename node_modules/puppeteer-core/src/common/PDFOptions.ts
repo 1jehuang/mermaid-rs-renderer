@@ -1,0 +1,236 @@
+/**
+ * @license
+ * Copyright 2020 Google Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @public
+ */
+export interface PDFMargin {
+  top?: string | number;
+  bottom?: string | number;
+  left?: string | number;
+  right?: string | number;
+}
+
+/**
+ * @public
+ */
+export type LowerCasePaperFormat =
+  | 'letter'
+  | 'legal'
+  | 'tabloid'
+  | 'ledger'
+  | 'a0'
+  | 'a1'
+  | 'a2'
+  | 'a3'
+  | 'a4'
+  | 'a5'
+  | 'a6';
+
+/**
+ * All the valid paper format types when printing a PDF.
+ *
+ * @remarks
+ *
+ * The sizes of each format are as follows:
+ *
+ * - `Letter`: 8.5in x 11in
+ *
+ * - `Legal`: 8.5in x 14in
+ *
+ * - `Tabloid`: 11in x 17in
+ *
+ * - `Ledger`: 17in x 11in
+ *
+ * - `A0`: 33.1102in x 46.811in
+ *
+ * - `A1`: 23.3858in x 33.1102in
+ *
+ * - `A2`: 16.5354in x 23.3858in
+ *
+ * - `A3`: 11.6929in x 16.5354in
+ *
+ * - `A4`: 8.2677in x 11.6929in
+ *
+ * - `A5`: 5.8268in x 8.2677in
+ *
+ * - `A6`: 4.1339in x 5.8268in
+ *
+ * @public
+ */
+export type PaperFormat =
+  | Uppercase<LowerCasePaperFormat>
+  | Capitalize<LowerCasePaperFormat>
+  | LowerCasePaperFormat;
+
+/**
+ * Valid options to configure PDF generation via {@link Page.pdf}.
+ * @public
+ */
+export interface PDFOptions {
+  /**
+   * Scales the rendering of the web page. Amount must be between `0.1` and `2`.
+   * @defaultValue `1`
+   */
+  scale?: number;
+  /**
+   * Whether to show the header and footer.
+   * @defaultValue `false`
+   */
+  displayHeaderFooter?: boolean;
+  /**
+   * HTML template for the print header. Should be valid HTML with the following
+   * classes used to inject values into them:
+   *
+   * - `date` formatted print date
+   *
+   * - `title` document title
+   *
+   * - `url` document location
+   *
+   * - `pageNumber` current page number
+   *
+   * - `totalPages` total pages in the document
+   */
+  headerTemplate?: string;
+  /**
+   * HTML template for the print footer. Has the same constraints and support
+   * for special classes as {@link PDFOptions.headerTemplate}.
+   */
+  footerTemplate?: string;
+  /**
+   * Set to `true` to print background graphics.
+   * @defaultValue `false`
+   */
+  printBackground?: boolean;
+  /**
+   * Whether to print in landscape orientation.
+   * @defaultValue `false`
+   */
+  landscape?: boolean;
+  /**
+   * Paper ranges to print, e.g. `1-5, 8, 11-13`.
+   * @defaultValue The empty string, which means all pages are printed.
+   */
+  pageRanges?: string;
+  /**
+   * @remarks
+   * If set, this takes priority over the `width` and `height` options.
+   * @defaultValue `letter`.
+   */
+  format?: PaperFormat;
+  /**
+   * Sets the width of paper. You can pass in a number or a string with a unit.
+   */
+  width?: string | number;
+  /**
+   * Sets the height of paper. You can pass in a number or a string with a unit.
+   */
+  height?: string | number;
+  /**
+   * Give any CSS `@page` size declared in the page priority over what is
+   * declared in the `width` or `height` or `format` option.
+   * @defaultValue `false`, which will scale the content to fit the paper size.
+   */
+  preferCSSPageSize?: boolean;
+  /**
+   * Set the PDF margins.
+   * @defaultValue `undefined` no margins are set.
+   */
+  margin?: PDFMargin;
+  /**
+   * The path to save the file to.
+   *
+   * @remarks
+   *
+   * If the path is relative, it's resolved relative to the current working directory.
+   *
+   * @defaultValue `undefined`, which means the PDF will not be written to disk.
+   */
+  path?: string;
+  /**
+   * Hides default white background and allows generating pdfs with transparency.
+   * @defaultValue `false`
+   */
+  omitBackground?: boolean;
+  /**
+   * Generate tagged (accessible) PDF.
+   *
+   * @defaultValue `true`
+   * @experimental
+   */
+  tagged?: boolean;
+  /**
+   * Generate document outline.
+   *
+   * @defaultValue `false`
+   * @experimental
+   */
+  outline?: boolean;
+  /**
+   * Timeout in milliseconds. Pass `0` to disable timeout.
+   *
+   * The default value can be changed by using {@link Page.setDefaultTimeout}
+   *
+   * @defaultValue `30_000`
+   */
+  timeout?: number;
+  /**
+   * If true, waits for `document.fonts.ready` to resolve. This might require
+   * activating the page using {@link Page.bringToFront} if the page is in the
+   * background.
+   *
+   * @defaultValue `true`
+   */
+  waitForFonts?: boolean;
+}
+
+/**
+ * @internal
+ */
+export interface PaperFormatDimensions {
+  width: number;
+  height: number;
+}
+
+/**
+ * @internal
+ */
+export interface ParsedPDFOptionsInterface {
+  width: number;
+  height: number;
+  margin: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  };
+}
+
+/**
+ * @internal
+ */
+export type ParsedPDFOptions = Required<
+  Omit<PDFOptions, 'path' | 'format' | 'timeout'> & ParsedPDFOptionsInterface
+>;
+
+/**
+ * @internal
+ */
+export const paperFormats: Record<LowerCasePaperFormat, PaperFormatDimensions> =
+  {
+    letter: {width: 8.5, height: 11},
+    legal: {width: 8.5, height: 14},
+    tabloid: {width: 11, height: 17},
+    ledger: {width: 17, height: 11},
+    a0: {width: 33.1102, height: 46.811},
+    a1: {width: 23.3858, height: 33.1102},
+    a2: {width: 16.5354, height: 23.3858},
+    a3: {width: 11.6929, height: 16.5354},
+    a4: {width: 8.2677, height: 11.6929},
+    a5: {width: 5.8268, height: 8.2677},
+    a6: {width: 4.1339, height: 5.8268},
+  } as const;

@@ -1,0 +1,6 @@
+# This file is used to configure to ignore the given commit sha in git blame
+# To apply this file, run the following command:
+# git config blame.ignorerevsfile .git-blame-ignore-revs
+
+# This commit formatted the entire codebase
+80987154e7740ddae2c7c0a04607bc25da51586e

@@ -1,0 +1,47 @@
+flowchart TB
+    subgraph Output
+        OP[Output Probabilities]
+        SM[Softmax]
+        LIN[Linear]
+    end
+
+    subgraph Decoder["Decoder (Nx)"]
+        DFF[Feed Forward]
+        DAN3[Add & Norm]
+        MHA2[Multi-Head Attention]
+        DAN2[Add & Norm]
+        MMHA[Masked Multi-Head Attention]
+        DAN1[Add & Norm]
+    end
+
+    subgraph Encoder["Encoder (Nx)"]
+        EFF[Feed Forward]
+        EAN2[Add & Norm]
+        MHA1[Multi-Head Attention]
+        EAN1[Add & Norm]
+    end
+
+    subgraph InputEnc[" "]
+        PE1[Positional Encoding]
+        IE[Input Embedding]
+        INP[Inputs]
+    end
+
+    subgraph InputDec[" "]
+        PE2[Positional Encoding]
+        OE[Output Embedding]
+        OUTP[Outputs]
+    end
+
+    INP --> IE --> PE1 --> EAN1
+    EAN1 --> MHA1 --> EAN2
+    EAN2 --> EFF --> Encoder
+
+    OUTP --> OE --> PE2 --> DAN1
+    DAN1 --> MMHA --> DAN2
+    DAN2 --> MHA2 --> DAN3
+    DAN3 --> DFF --> Decoder
+
+    Encoder --> MHA2
+
+    Decoder --> LIN --> SM --> OP

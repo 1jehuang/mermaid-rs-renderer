@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/detector.ts"],
+  "sourcesContent": ["import type { ExternalDiagramDefinition } from 'mermaid';\n\nconst id = 'zenuml';\n\nconst detector = (txt: string) => {\n  return /^\\s*zenuml/.test(txt);\n};\n\nconst loader = async () => {\n  const { diagram } = await import('./zenuml-definition.js');\n  return { id, diagram };\n};\n\nconst plugin: ExternalDiagramDefinition = {\n  id,\n  detector,\n  loader,\n};\n\nexport default plugin;\n"],
+  "mappings": "uEAEA,IAAMA,EAAK,SAELC,EAAWC,EAACC,GACT,aAAa,KAAKA,CAAG,EADb,YAIXC,EAASF,EAAA,SAAY,CACzB,GAAM,CAAE,QAAAG,CAAQ,EAAI,KAAM,QAAO,gEAAwB,EACzD,MAAO,CAAE,GAAAL,EAAI,QAAAK,CAAQ,CACvB,EAHe,UAKTC,EAAoC,CACxC,GAAAN,EACA,SAAAC,EACA,OAAAG,CACF,EAEOG,EAAQD",
+  "names": ["id", "detector", "__name", "txt", "loader", "diagram", "plugin", "detector_default"]
+}

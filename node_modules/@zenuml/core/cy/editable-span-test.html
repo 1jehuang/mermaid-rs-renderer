@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>EditableSpan Test Page</title>
+    <style>
+      body {
+        margin: 20px;
+        font-family: Arial, sans-serif;
+      }
+      .test-container {
+        margin: 20px 0;
+        padding: 20px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      .label {
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+      .log {
+        margin-top: 10px;
+        padding: 10px;
+        background: #f5f5f5;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 12px;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .log-entry {
+        margin: 2px 0;
+      }
+      .log-save {
+        color: green;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>EditableSpan Test Page</h1>
+    
+    <div class="test-container">
+      <div class="label">Test 1: Basic ESC Cancel</div>
+      <div>
+        Text: <span id="test1-span" data-testid="test1-span"></span>
+      </div>
+      <div class="log" id="test1-log" data-testid="test1-log"></div>
+    </div>
+
+    <div class="test-container">
+      <div class="label">Test 2: Enter Save</div>
+      <div>
+        Text: <span id="test2-span" data-testid="test2-span"></span>
+      </div>
+      <div class="log" id="test2-log" data-testid="test2-log"></div>
+    </div>
+
+    <div class="test-container">
+      <div class="label">Test 3: Blur Save</div>
+      <div>
+        Text: <span id="test3-span" data-testid="test3-span"></span>
+      </div>
+      <div class="log" id="test3-log" data-testid="test3-log"></div>
+      <button id="blur-target" data-testid="blur-target">Click here to blur</button>
+    </div>
+
+    <script type="module">
+      import { createRoot } from 'react-dom/client';
+      import { createElement } from 'react';
+      import { EditableSpan } from '../src/components/common/EditableSpan/EditableSpan';
+
+      function createLogger(logId) {
+        const logEl = document.getElementById(logId);
+        return {
+          log: (message, type = 'info') => {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+          }
+        };
+      }
+
+      function createReactiveSpan(rootEl, logger, initialValue) {
+        let value = initialValue;
+        const render = () => {
+          rootEl.render(createElement(EditableSpan, {
+            text: value,
+            onSave: (newText) => {
+              value = newText;
+              logger.log(`onSave called: "${newText}"`, 'save');
+              render();
+            }
+          }));
+        };
+        render();
+      }
+
+      // Test 1: ESC Cancel - should NOT call onSave when ESC is pressed
+      const logger1 = createLogger('test1-log');
+      const root1 = createRoot(document.getElementById('test1-span'));
+      createReactiveSpan(root1, logger1, 'Original Text');
+
+      // Test 2: Enter Save
+      const logger2 = createLogger('test2-log');
+      const root2 = createRoot(document.getElementById('test2-span'));
+      createReactiveSpan(root2, logger2, 'Press Enter');
+
+      // Test 3: Blur Save
+      const logger3 = createLogger('test3-log');
+      const root3 = createRoot(document.getElementById('test3-span'));
+      createReactiveSpan(root3, logger3, 'Click Outside');
+
+      // Make loggers available for testing
+      window.testLoggers = { logger1, logger2, logger3 };
+    </script>
+  </body>
+</html>

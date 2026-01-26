@@ -1,0 +1,41 @@
+{
+  "name": "vega-view",
+  "version": "6.1.0",
+  "description": "View component and transforms for Vega visualizations.",
+  "keywords": [
+    "vega",
+    "view",
+    "layout"
+  ],
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "author": {
+    "name": "Vega",
+    "url": "https://vega.github.io"
+  },
+  "exports": {
+    "default": "./build/vega-view.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vega/vega.git"
+  },
+  "scripts": {
+    "prebuild": "del-cli build",
+    "build": "rollup -c rollup.config.js",
+    "pretest": "npm run build -- --config-test",
+    "test": "tape 'test/**/*-test.js'",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "dependencies": {
+    "d3-array": "^3.2.4",
+    "d3-timer": "^3.0.1",
+    "vega-dataflow": "^6.1.0",
+    "vega-format": "^2.1.0",
+    "vega-functions": "^6.1.0",
+    "vega-runtime": "^7.1.0",
+    "vega-scenegraph": "^5.1.0",
+    "vega-util": "^2.1.0"
+  },
+  "gitHead": "4dea72921d25bf6ff6636a9f9cb6c63ff696932c"
+}

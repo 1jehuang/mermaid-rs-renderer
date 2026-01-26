@@ -1,0 +1,9 @@
+export {default as axisticks} from './src/AxisTicks.js';
+export {default as datajoin} from './src/DataJoin.js';
+export {default as encode} from './src/Encode.js';
+export {default as legendentries} from './src/LegendEntries.js';
+export {default as linkpath} from './src/LinkPath.js';
+export {default as pie} from './src/Pie.js';
+export {default as scale} from './src/Scale.js';
+export {default as sortitems} from './src/SortItems.js';
+export {default as stack} from './src/Stack.js';

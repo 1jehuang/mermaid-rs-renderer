@@ -1,0 +1,72 @@
+{
+  "name": "@mermaid-js/mermaid-cli",
+  "version": "11.12.0",
+  "description": "Command-line interface for mermaid",
+  "license": "MIT",
+  "repository": "git@github.com:mermaid-js/mermaid-cli.git",
+  "type": "module",
+  "author": "Tyler Long <tyler4long@gmail.com>",
+  "bin": {
+    "mmdc": "./src/cli.js"
+  },
+  "engines": {
+    "node": "^18.19 || >=20.0"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist-types/src/index.d.ts",
+        "default": "./src/index.js"
+      }
+    }
+  },
+  "types": "./dist-types/src/index.d.ts",
+  "scripts": {
+    "prepare": "tsc && vite build",
+    "prepack": "tsc && vite build",
+    "test": "NODE_OPTIONS=\"$NODE_OPTIONS --experimental-vm-modules\" npx jest",
+    "test:cli": "bash run-tests.sh test-positive",
+    "version": "node scripts/version.js",
+    "lint": "standard",
+    "lint-fix": "standard --fix"
+  },
+  "dependencies": {
+    "@mermaid-js/mermaid-zenuml": "^0.2.0",
+    "chalk": "^5.0.1",
+    "commander": "^14.0.0",
+    "import-meta-resolve": "^4.1.0",
+    "mermaid": "^11.0.2"
+  },
+  "peerDependencies": {
+    "puppeteer": "^23"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "^6.5.2",
+    "@mermaid-js/layout-elk": "^0.1.2",
+    "@tsconfig/node18": "^18.2.4",
+    "@types/node": "~18.19.31",
+    "jest": "^30.0.5",
+    "puppeteer": "^23.1.1",
+    "standard": "^17.0.0",
+    "typescript": "^5.0.1-rc",
+    "vite": "^6.0.2",
+    "yarn-upgrade-all": "^0.7.0"
+  },
+  "files": [
+    "src/",
+    "dist/",
+    "dist-types/"
+  ],
+  "jest": {
+    "moduleNameMapper": {
+      "#(.*)": "<rootDir>/node_modules/$1"
+    }
+  },
+  "standard": {
+    "ignore": [
+      "/dist/",
+      "/dist-types/"
+    ]
+  },
+  "packageManager": "npm@10.8.1"
+}

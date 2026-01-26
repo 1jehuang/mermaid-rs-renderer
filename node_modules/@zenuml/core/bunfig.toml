@@ -1,0 +1,52 @@
+# Bun configuration file
+
+[test]
+# Preload setup file for test environment
+preload = ["./test-setup.ts"]
+
+# Project root directory
+root = "./"
+
+# Note: To exclude /tests folder (Playwright tests), use the npm script:
+# bun run test:bun
+# Or run directly: bun test 'src/**/*.{spec,test}.{ts,tsx}' 'test/**/*.{spec,test}.{ts,tsx}'
+
+# Coverage configuration
+# Disabled by default due to resource issues with large asset files
+# Enable with: bun test --coverage
+coverage = false
+coverageReporter = ["text"]
+coverageDirectory = "./coverage"
+
+# Timeout for tests (in milliseconds)
+timeout = 5000
+
+# Run tests in watch mode by default
+# watch = false
+
+[install]
+# Package manager settings
+peer = true
+dev = true
+optional = true
+
+# Auto install dependencies
+auto = "auto"
+
+# Disable cache if needed
+# disable = false
+
+[install.lockfile]
+# Save exact versions
+save = true
+
+# Print changes to lockfile
+print = "bun"
+
+[run]
+# Bun runtime settings for scripts
+# Silent mode for cleaner output
+# silent = false
+
+# Automatically install missing packages when running scripts
+autoInstall = true

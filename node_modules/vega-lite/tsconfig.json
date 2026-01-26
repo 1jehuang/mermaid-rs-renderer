@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "strictNullChecks": false,
+    "preserveConstEnums": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "ignoreDeprecations": "5.0",
+    "noEmit": true,
+    "types": ["vitest/globals", "@vitest/browser/matchers", "node"],
+    "skipLibCheck": true
+  },
+  "files": ["src/index.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "test-runtime/**/*.ts",
+    "site/static/**/*.ts",
+    "examples/*.test.ts",
+    "vitest.config.ts",
+    "vitest.global-setup.ts"
+  ],
+  "exclude": ["build/**/*"]
+}

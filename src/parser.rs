@@ -17,7 +17,7 @@ static INIT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^%%\{\s*init\s*:\s*(\{.*\})\s*\}%%").unwrap());
 static PIPE_LABEL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^(?P<left>.+?)\s*(?P<arrow1><?[-.=ox]*[-=]+[-.=ox]*)\|(?P<label>.+?)\|(?P<arrow2>[-.=ox]*[-=]+[-.=ox]*>?)\s*(?P<right>.+)$",
+        r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+)\|(?P<label>.+?)\|\s*(?P<right>.+)$",
     )
     .unwrap()
 });
@@ -32,6 +32,9 @@ static ARROW_RE: Lazy<Regex> = Lazy::new(|| {
         r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+)\s*(?P<right>.+)$",
     )
     .unwrap()
+});
+static ARROW_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"<[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+").unwrap()
 });
 
 #[derive(Debug, Default)]
@@ -306,56 +309,17 @@ fn parse_flowchart(input: &str) -> Result<ParseOutput> {
                 continue;
             }
 
-            if let Some((left, label, right, edge_meta)) = parse_edge_line(&line) {
-                let sources: Vec<&str> = left
-                    .split('&')
-                    .map(|part| part.trim())
-                    .filter(|part| !part.is_empty())
-                    .collect();
-                let targets: Vec<&str> = right
-                    .split('&')
-                    .map(|part| part.trim())
-                    .filter(|part| !part.is_empty())
-                    .collect();
-
-                let mut source_ids = Vec::new();
-                for source in sources {
-                    let (left_id, left_label, left_shape, left_classes) = parse_node_token(source);
-                    graph.ensure_node(&left_id, left_label, left_shape);
-                    apply_node_classes(&mut graph, &left_id, &left_classes);
-                    add_node_to_subgraphs(&mut graph, &subgraph_stack, &left_id);
-                    source_ids.push(left_id);
+            if let Some(chain_lines) = split_edge_chain(&line) {
+                let mut added = false;
+                for edge_line in chain_lines {
+                    added |= add_flowchart_edge(&edge_line, &mut graph, &subgraph_stack);
                 }
-
-                let mut target_ids = Vec::new();
-                for target in targets {
-                    let (right_id, right_label, right_shape, right_classes) =
-                        parse_node_token(target);
-                    graph.ensure_node(&right_id, right_label, right_shape);
-                    apply_node_classes(&mut graph, &right_id, &right_classes);
-                    add_node_to_subgraphs(&mut graph, &subgraph_stack, &right_id);
-                    target_ids.push(right_id);
+                if added {
+                    continue;
                 }
+            }
 
-                for left_id in &source_ids {
-                    for right_id in &target_ids {
-                        graph.edges.push(crate::ir::Edge {
-                            from: left_id.clone(),
-                            to: right_id.clone(),
-                            label: label.clone(),
-                            start_label: None,
-                            end_label: None,
-                            directed: edge_meta.directed,
-                            arrow_start: edge_meta.arrow_start,
-                            arrow_end: edge_meta.arrow_end,
-                            arrow_start_kind: edge_meta.arrow_start_kind,
-                            arrow_end_kind: edge_meta.arrow_end_kind,
-                            start_decoration: edge_meta.start_decoration,
-                            end_decoration: edge_meta.end_decoration,
-                            style: edge_meta.style,
-                        });
-                    }
-                }
+            if add_flowchart_edge(&line, &mut graph, &subgraph_stack) {
                 continue;
             }
 
@@ -368,6 +332,63 @@ fn parse_flowchart(input: &str) -> Result<ParseOutput> {
     }
 
     Ok(ParseOutput { graph, init_config })
+}
+
+fn add_flowchart_edge(line: &str, graph: &mut Graph, subgraph_stack: &[usize]) -> bool {
+    let Some((left, label, right, edge_meta)) = parse_edge_line(line) else {
+        return false;
+    };
+
+    let sources: Vec<&str> = left
+        .split('&')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+    let targets: Vec<&str> = right
+        .split('&')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    let mut source_ids = Vec::new();
+    for source in sources {
+        let (left_id, left_label, left_shape, left_classes) = parse_node_token(source);
+        graph.ensure_node(&left_id, left_label, left_shape);
+        apply_node_classes(graph, &left_id, &left_classes);
+        add_node_to_subgraphs(graph, subgraph_stack, &left_id);
+        source_ids.push(left_id);
+    }
+
+    let mut target_ids = Vec::new();
+    for target in targets {
+        let (right_id, right_label, right_shape, right_classes) = parse_node_token(target);
+        graph.ensure_node(&right_id, right_label, right_shape);
+        apply_node_classes(graph, &right_id, &right_classes);
+        add_node_to_subgraphs(graph, subgraph_stack, &right_id);
+        target_ids.push(right_id);
+    }
+
+    for left_id in &source_ids {
+        for right_id in &target_ids {
+            graph.edges.push(crate::ir::Edge {
+                from: left_id.clone(),
+                to: right_id.clone(),
+                label: label.clone(),
+                start_label: None,
+                end_label: None,
+                directed: edge_meta.directed,
+                arrow_start: edge_meta.arrow_start,
+                arrow_end: edge_meta.arrow_end,
+                arrow_start_kind: edge_meta.arrow_start_kind,
+                arrow_end_kind: edge_meta.arrow_end_kind,
+                start_decoration: edge_meta.start_decoration,
+                end_decoration: edge_meta.end_decoration,
+                style: edge_meta.style,
+            });
+        }
+    }
+
+    true
 }
 
 fn split_trailing_quoted(input: &str) -> Option<(&str, &str)> {
@@ -1304,20 +1325,29 @@ fn split_er_cardinality_right(input: &str) -> (String, Option<String>) {
     (trimmed.to_string(), None)
 }
 
-fn normalize_er_cardinality(token: &str) -> String {
+fn normalize_er_cardinality(token: &str) -> (String, Option<crate::ir::EdgeDecoration>) {
     let trimmed = token.trim();
     match trimmed {
-        "||" | "|" => "1".to_string(),
-        "o|" | "|o" | "o" => "0..1".to_string(),
-        "|{" | "}|" => "1..*".to_string(),
-        "o{" | "}o" | "}" | "{" => "0..*".to_string(),
-        _ => trimmed.to_string(),
+        "||" | "|" => ("1".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootOne)),
+        "o|" | "|o" | "o" => ("0..1".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootZeroOne)),
+        "|{" | "}|" => ("1..*".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootMany)),
+        "o{" | "}o" | "}" | "{" => ("0..*".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootZeroMany)),
+        _ => (trimmed.to_string(), None),
     }
 }
 
 fn parse_er_relation_line(
     line: &str,
-) -> Option<(String, String, Option<String>, Option<String>, Option<String>, crate::ir::EdgeStyle)> {
+) -> Option<(
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<crate::ir::EdgeDecoration>,
+    Option<crate::ir::EdgeDecoration>,
+    crate::ir::EdgeStyle,
+)> {
     let (relation_part, label) = if let Some((before, after)) = line.split_once(':') {
         let label = after.trim();
         let label = if label.is_empty() {
@@ -1352,9 +1382,24 @@ fn parse_er_relation_line(
     if left_id.is_empty() || right_id.is_empty() {
         return None;
     }
-    let left_label = left_card.map(|token| normalize_er_cardinality(&token));
-    let right_label = right_card.map(|token| normalize_er_cardinality(&token));
-    Some((left_id, right_id, label, left_label, right_label, style))
+    let (left_label, left_decoration) = left_card
+        .map(|token| normalize_er_cardinality(&token))
+        .map(|(label, dec)| (Some(label), dec))
+        .unwrap_or((None, None));
+    let (right_label, right_decoration) = right_card
+        .map(|token| normalize_er_cardinality(&token))
+        .map(|(label, dec)| (Some(label), dec))
+        .unwrap_or((None, None));
+    Some((
+        left_id,
+        right_id,
+        label,
+        left_label,
+        right_label,
+        left_decoration,
+        right_decoration,
+        style,
+    ))
 }
 
 fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
@@ -1393,7 +1438,7 @@ fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
 
-        if let Some((left, right, label, left_label, right_label, style)) =
+        if let Some((left, right, label, left_label, right_label, left_decoration, right_decoration, style)) =
             parse_er_relation_line(line)
         {
             graph.ensure_node(&left, None, Some(crate::ir::NodeShape::Rectangle));
@@ -1409,8 +1454,8 @@ fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
                 arrow_end: false,
                 arrow_start_kind: None,
                 arrow_end_kind: None,
-                start_decoration: None,
-                end_decoration: None,
+                start_decoration: left_decoration,
+                end_decoration: right_decoration,
                 style,
             });
             continue;
@@ -1524,6 +1569,7 @@ fn parse_mindmap_diagram(input: &str) -> Result<ParseOutput> {
     let (lines, init_config) = preprocess_input_keep_indent(input)?;
     let mut stack: Vec<String> = Vec::new();
     let mut base_indent: Option<usize> = None;
+    let mut node_index: HashMap<String, usize> = HashMap::new();
 
     for raw_line in lines {
         let trimmed = raw_line.trim();
@@ -1543,36 +1589,100 @@ fn parse_mindmap_diagram(input: &str) -> Result<ParseOutput> {
             level = stack.len();
         }
 
-        let (mut id, label, shape, classes) = parse_node_token(trimmed);
+        let (raw_id, label, node_type, classes) = parse_mindmap_node_token(trimmed);
+        let mut id = raw_id;
+        if id.is_empty() {
+            id = sanitize_id(&label);
+        }
+        if id.is_empty() {
+            id = format!("mindmap_{}", graph.mindmap.nodes.len());
+        }
         if graph.nodes.contains_key(&id) {
             id = format!("{}_{}", id, graph.nodes.len());
         }
-        graph.ensure_node(&id, label, shape);
+
+        let shape = match node_type {
+            crate::ir::MindmapNodeType::Circle => crate::ir::NodeShape::Circle,
+            crate::ir::MindmapNodeType::RoundedRect => crate::ir::NodeShape::RoundRect,
+            crate::ir::MindmapNodeType::Rect => crate::ir::NodeShape::Rectangle,
+            crate::ir::MindmapNodeType::Hexagon => crate::ir::NodeShape::Hexagon,
+            crate::ir::MindmapNodeType::Cloud | crate::ir::MindmapNodeType::Bang => {
+                crate::ir::NodeShape::RoundRect
+            }
+            crate::ir::MindmapNodeType::Default => crate::ir::NodeShape::MindmapDefault,
+        };
+
+        graph.ensure_node(&id, Some(label.clone()), Some(shape));
         if !classes.is_empty() {
             apply_node_classes(&mut graph, &id, &classes);
         }
 
-        if level > 0 {
-            if stack.len() > level {
-                stack.truncate(level);
+        if graph.mindmap.root_id.is_none() {
+            graph.mindmap.root_id = Some(id.clone());
+        }
+
+        if level > 0 && stack.len() > level {
+            stack.truncate(level);
+        }
+
+        let parent_id = if level > 0 {
+            stack.last().cloned()
+        } else {
+            None
+        };
+
+        let section = if level == 0 {
+            None
+        } else if let Some(parent_id) = parent_id.as_ref() {
+            let parent_idx = node_index.get(parent_id).copied();
+            if let Some(parent_idx) = parent_idx {
+                let parent = &graph.mindmap.nodes[parent_idx];
+                if parent.level == 0 {
+                    Some(parent.children.len())
+                } else {
+                    parent.section
+                }
+            } else {
+                None
             }
-            if let Some(parent) = stack.last().cloned() {
-                graph.edges.push(crate::ir::Edge {
-                    from: parent,
-                    to: id.clone(),
-                    label: None,
-                    start_label: None,
-                    end_label: None,
-                    directed: false,
-                    arrow_start: false,
-                    arrow_end: false,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
-                });
+        } else {
+            None
+        };
+
+        let node = crate::ir::MindmapNode {
+            id: id.clone(),
+            label: label.clone(),
+            level,
+            section,
+            node_type,
+            icon: None,
+            class: None,
+            children: Vec::new(),
+        };
+
+        let idx = graph.mindmap.nodes.len();
+        graph.mindmap.nodes.push(node);
+        node_index.insert(id.clone(), idx);
+
+        if let Some(parent_id) = parent_id {
+            if let Some(parent_idx) = node_index.get(&parent_id).copied() {
+                graph.mindmap.nodes[parent_idx].children.push(id.clone());
             }
+            graph.edges.push(crate::ir::Edge {
+                from: parent_id,
+                to: id.clone(),
+                label: None,
+                start_label: None,
+                end_label: None,
+                directed: false,
+                arrow_start: false,
+                arrow_end: false,
+                arrow_start_kind: None,
+                arrow_end_kind: None,
+                start_decoration: None,
+                end_decoration: None,
+                style: crate::ir::EdgeStyle::Solid,
+            });
         } else {
             stack.clear();
         }
@@ -1581,6 +1691,86 @@ fn parse_mindmap_diagram(input: &str) -> Result<ParseOutput> {
     }
 
     Ok(ParseOutput { graph, init_config })
+}
+
+fn parse_mindmap_node_token(
+    token: &str,
+) -> (String, String, crate::ir::MindmapNodeType, Vec<String>) {
+    let (base, classes) = split_inline_classes(token);
+    let trimmed = base.trim();
+    if trimmed.is_empty() {
+        return (String::new(), String::new(), crate::ir::MindmapNodeType::Default, classes);
+    }
+
+    let mut id = String::new();
+    let mut label = trimmed.to_string();
+    let mut node_type = crate::ir::MindmapNodeType::Default;
+
+    let shape_start = trimmed
+        .find(|ch: char| ch == '[' || ch == '(' || ch == '{')
+        .unwrap_or(0);
+    if shape_start > 0 && !trimmed[..shape_start].contains(' ') {
+        id = trimmed[..shape_start].trim().to_string();
+        let raw = trimmed[shape_start..].trim();
+        if let Some((shape_label, shape_type)) = parse_mindmap_shape(raw) {
+            label = shape_label;
+            node_type = shape_type;
+        }
+    } else if let Some((shape_label, shape_type)) = parse_mindmap_shape(trimmed) {
+        label = shape_label;
+        node_type = shape_type;
+    }
+
+    if id.is_empty() {
+        id = sanitize_id(&label);
+    }
+
+    (id, label, node_type, classes)
+}
+
+fn parse_mindmap_shape(
+    raw: &str,
+) -> Option<(String, crate::ir::MindmapNodeType)> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("((") && trimmed.ends_with("))") {
+        return Some((
+            strip_quotes(&trimmed[2..trimmed.len() - 2]),
+            crate::ir::MindmapNodeType::Circle,
+        ));
+    }
+    if trimmed.starts_with("{{") && trimmed.ends_with("}}") {
+        return Some((
+            strip_quotes(&trimmed[2..trimmed.len() - 2]),
+            crate::ir::MindmapNodeType::Hexagon,
+        ));
+    }
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        return Some((
+            strip_quotes(&trimmed[1..trimmed.len() - 1]),
+            crate::ir::MindmapNodeType::Rect,
+        ));
+    }
+    if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        return Some((
+            strip_quotes(&trimmed[1..trimmed.len() - 1]),
+            crate::ir::MindmapNodeType::RoundedRect,
+        ));
+    }
+    None
+}
+
+fn sanitize_id(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_alphanumeric() {
+            out.push(ch);
+        } else if ch.is_whitespace() || ch == '-' || ch == '_' {
+            if !out.ends_with('_') {
+                out.push('_');
+            }
+        }
+    }
+    out.trim_matches('_').to_string()
 }
 
 fn parse_journey_diagram(input: &str) -> Result<ParseOutput> {
@@ -1971,10 +2161,62 @@ fn extract_gantt_timing(details: &[String]) -> (Option<String>, Option<String>) 
     (start, duration)
 }
 
+fn requirement_kind_label(kind: &str) -> String {
+    let lower = kind.trim().to_ascii_lowercase();
+    let mut chars = lower.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.push(first.to_ascii_uppercase());
+    out.extend(chars);
+    out
+}
+
+fn requirement_title_case(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let mut chars = lower.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.push(first.to_ascii_uppercase());
+    out.extend(chars);
+    out
+}
+
+fn normalize_requirement_attr(line: &str) -> String {
+    let Some((key_raw, value_raw)) = line.split_once(':') else {
+        return line.trim().to_string();
+    };
+    let key = key_raw.trim().to_ascii_lowercase();
+    let value = value_raw.trim();
+    let pretty_key = match key.as_str() {
+        "id" => "ID".to_string(),
+        "text" => "Text".to_string(),
+        "risk" => "Risk".to_string(),
+        "verifymethod" | "verification" => "Verification".to_string(),
+        other => requirement_kind_label(other),
+    };
+    let pretty_value = match key.as_str() {
+        "risk" | "verifymethod" | "verification" => requirement_title_case(value),
+        _ => value.to_string(),
+    };
+    if pretty_value.is_empty() {
+        pretty_key
+    } else {
+        format!("{pretty_key}: {pretty_value}")
+    }
+}
+
 fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::Requirement;
-    graph.direction = Direction::LeftRight;
+    graph.direction = Direction::TopDown;
     let (lines, init_config) = preprocess_input(input)?;
 
     let mut attributes: HashMap<String, Vec<String>> = HashMap::new();
@@ -2033,7 +2275,8 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
                 let label = if kind.is_empty() {
                     id.clone()
                 } else {
-                    format!("{}\n<<{}>>", id, kind)
+                    let kind_label = requirement_kind_label(&kind);
+                    format!("<<{}>>\n{}", kind_label, id)
                 };
                 graph.ensure_node(&id, Some(label), Some(crate::ir::NodeShape::Rectangle));
                 current_id = Some(id.clone());
@@ -2058,7 +2301,8 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
             let label = if kind.is_empty() {
                 id.to_string()
             } else {
-                format!("{}\n<<{}>>", id, kind)
+                let kind_label = requirement_kind_label(kind);
+                format!("<<{}>>\n{}", kind_label, id)
             };
             graph.ensure_node(id, Some(label), Some(crate::ir::NodeShape::Rectangle));
         }
@@ -2070,7 +2314,7 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
         {
             let mut lines = Vec::new();
             lines.push(node.label.clone());
-            lines.extend(attrs.clone());
+            lines.extend(attrs.iter().map(|attr| normalize_requirement_attr(attr)));
             node.label = lines.join("\n");
         }
     }
@@ -2088,10 +2332,19 @@ fn parse_requirement_relation_line(line: &str) -> Option<(String, String, String
     let (from_part, rel_part) = left.split_once('-')?;
     let from = from_part.trim();
     let rel = rel_part.trim().trim_matches('-').trim();
-    if from.is_empty() || rel.is_empty() {
+    let rel_clean = rel
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim();
+    if from.is_empty() || rel_clean.is_empty() {
         return None;
     }
-    Some((from.to_string(), rel.to_string(), to.to_string()))
+    let rel_label = if rel.starts_with("<<") && rel.ends_with(">>") {
+        rel.to_string()
+    } else {
+        format!("<<{}>>", rel_clean)
+    };
+    Some((from.to_string(), rel_label, to.to_string()))
 }
 
 fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
@@ -2101,9 +2354,21 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
     let (lines, init_config) = preprocess_input(input)?;
 
     let mut branch_heads: HashMap<String, Option<String>> = HashMap::new();
-    let mut current_branch = "main".to_string();
-    branch_heads.insert(current_branch.clone(), None);
-    let mut commit_counter: usize = 0;
+    let mut branch_insertion: HashMap<String, usize> = HashMap::new();
+
+    let main_branch = "main".to_string();
+    graph.gitgraph.main_branch = main_branch.clone();
+    branch_heads.insert(main_branch.clone(), None);
+    branch_insertion.insert(main_branch.clone(), 0);
+    graph.gitgraph.branches.push(crate::ir::GitGraphBranch {
+        name: main_branch.clone(),
+        order: Some(0.0),
+        insertion_index: 0,
+    });
+
+    let mut current_branch = main_branch;
+    let mut commit_seq: usize = 0;
+    let mut rng = GitGraphIdRng::new(hash_seed(input));
 
     for raw_line in lines {
         let line = raw_line.trim();
@@ -2114,19 +2379,47 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
         if lower.starts_with("gitgraph") {
             continue;
         }
+        if let Some(direction) = parse_gitgraph_direction(line) {
+            graph.direction = direction;
+            continue;
+        }
         if lower.starts_with("branch ") {
             let name = line.get(7..).unwrap_or("").trim();
             if !name.is_empty() {
+                let order = extract_gitgraph_order(line);
                 let head = branch_heads.get(&current_branch).cloned().unwrap_or(None);
                 branch_heads.insert(name.to_string(), head);
+                if !branch_insertion.contains_key(name) {
+                    let idx = graph.gitgraph.branches.len();
+                    branch_insertion.insert(name.to_string(), idx);
+                    graph.gitgraph.branches.push(crate::ir::GitGraphBranch {
+                        name: name.to_string(),
+                        order,
+                        insertion_index: idx,
+                    });
+                }
+                current_branch = name.to_string();
             }
             continue;
         }
-        if lower.starts_with("checkout ") {
-            let name = line.get(9..).unwrap_or("").trim();
+        if lower.starts_with("checkout ") || lower.starts_with("switch ") {
+            let name = if lower.starts_with("checkout ") {
+                line.get(9..).unwrap_or("").trim()
+            } else {
+                line.get(7..).unwrap_or("").trim()
+            };
             if !name.is_empty() {
                 current_branch = name.to_string();
                 branch_heads.entry(current_branch.clone()).or_insert(None);
+                if !branch_insertion.contains_key(name) {
+                    let idx = graph.gitgraph.branches.len();
+                    branch_insertion.insert(name.to_string(), idx);
+                    graph.gitgraph.branches.push(crate::ir::GitGraphBranch {
+                        name: name.to_string(),
+                        order: None,
+                        insertion_index: idx,
+                    });
+                }
             }
             continue;
         }
@@ -2140,85 +2433,213 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
             if from_head.is_none() && current_head.is_none() {
                 continue;
             }
-            commit_counter += 1;
-            let merge_id = format!("merge_{}", commit_counter);
-            let label = format!("merge {}", from_branch);
-            graph.ensure_node(
-                &merge_id,
-                Some(label),
-                Some(crate::ir::NodeShape::Circle),
-            );
-            if let Some(parent) = current_head {
-                graph.edges.push(crate::ir::Edge {
-                    from: parent,
-                    to: merge_id.clone(),
-                    label: None,
-                    start_label: None,
-                    end_label: None,
-                    directed: true,
-                    arrow_start: false,
-                    arrow_end: true,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
-                });
+            let mut parents = Vec::new();
+            if let Some(parent) = current_head.clone() {
+                parents.push(parent);
             }
-            if let Some(parent) = from_head {
-                graph.edges.push(crate::ir::Edge {
-                    from: parent,
-                    to: merge_id.clone(),
-                    label: None,
-                    start_label: None,
-                    end_label: None,
-                    directed: true,
-                    arrow_start: false,
-                    arrow_end: true,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
-                });
+            if let Some(parent) = from_head.clone() {
+                parents.push(parent);
             }
-            branch_heads.insert(current_branch.clone(), Some(merge_id));
+
+            let (id, custom_id) = extract_gitgraph_id(line)
+                .map(|value| (value, true))
+                .unwrap_or_else(|| {
+                    let hex = rng.next_hex(7);
+                    (format!("{commit_seq}-{hex}"), false)
+                });
+            let tags = extract_gitgraph_tags(line);
+            let custom_type = extract_gitgraph_commit_type(line);
+            let commit = crate::ir::GitGraphCommit {
+                id: id.clone(),
+                message: Some(format!(
+                    "merged branch {} into {}",
+                    from_branch, current_branch
+                )),
+                seq: commit_seq,
+                commit_type: crate::ir::GitGraphCommitType::Merge,
+                custom_type,
+                tags,
+                parents,
+                branch: current_branch.clone(),
+                custom_id,
+            };
+            commit_seq += 1;
+            graph.gitgraph.commits.push(commit);
+            branch_heads.insert(current_branch.clone(), Some(id));
             continue;
         }
         if lower.starts_with("commit") {
-            commit_counter += 1;
-            let id = extract_gitgraph_attr(line, "id")
-                .or_else(|| extract_gitgraph_attr(line, "tag"))
-                .unwrap_or_else(|| format!("C{}", commit_counter));
-            let node_id = format!("commit_{}", commit_counter);
-            graph.ensure_node(
-                &node_id,
-                Some(id),
-                Some(crate::ir::NodeShape::Circle),
-            );
-            if let Some(parent) = branch_heads.get(&current_branch).cloned().unwrap_or(None) {
-                graph.edges.push(crate::ir::Edge {
-                    from: parent,
-                    to: node_id.clone(),
-                    label: None,
-                    start_label: None,
-                    end_label: None,
-                    directed: true,
-                    arrow_start: false,
-                    arrow_end: true,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
+            let (id, custom_id) = extract_gitgraph_id(line)
+                .map(|value| (value, true))
+                .unwrap_or_else(|| {
+                    let hex = rng.next_hex(7);
+                    (format!("{commit_seq}-{hex}"), false)
                 });
-            }
-            branch_heads.insert(current_branch.clone(), Some(node_id));
+            let tags = extract_gitgraph_tags(line);
+            let commit_type =
+                extract_gitgraph_commit_type(line).unwrap_or(crate::ir::GitGraphCommitType::Normal);
+            let parents = branch_heads
+                .get(&current_branch)
+                .cloned()
+                .unwrap_or(None)
+                .map(|parent| vec![parent])
+                .unwrap_or_default();
+            let message = extract_gitgraph_message(line);
+            let commit = crate::ir::GitGraphCommit {
+                id: id.clone(),
+                message,
+                seq: commit_seq,
+                commit_type,
+                custom_type: None,
+                tags,
+                parents,
+                branch: current_branch.clone(),
+                custom_id,
+            };
+            commit_seq += 1;
+            graph.gitgraph.commits.push(commit);
+            branch_heads.insert(current_branch.clone(), Some(id));
             continue;
         }
     }
 
     Ok(ParseOutput { graph, init_config })
+}
+
+fn parse_gitgraph_direction(line: &str) -> Option<Direction> {
+    let trimmed = line.trim();
+    if trimmed.eq_ignore_ascii_case("LR") {
+        return Some(Direction::LeftRight);
+    }
+    if trimmed.eq_ignore_ascii_case("TB") {
+        return Some(Direction::TopDown);
+    }
+    if trimmed.eq_ignore_ascii_case("BT") {
+        return Some(Direction::BottomTop);
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("direction") {
+        let token = rest.trim();
+        if token.eq_ignore_ascii_case("lr") {
+            return Some(Direction::LeftRight);
+        }
+        if token.eq_ignore_ascii_case("tb") {
+            return Some(Direction::TopDown);
+        }
+        if token.eq_ignore_ascii_case("bt") {
+            return Some(Direction::BottomTop);
+        }
+    }
+    None
+}
+
+fn extract_gitgraph_id(line: &str) -> Option<String> {
+    extract_gitgraph_attr(line, "id")
+}
+
+fn extract_gitgraph_message(line: &str) -> Option<String> {
+    extract_gitgraph_attr(line, "msg")
+}
+
+fn extract_gitgraph_commit_type(line: &str) -> Option<crate::ir::GitGraphCommitType> {
+    let raw = extract_gitgraph_attr(line, "type")?;
+    match raw.to_ascii_uppercase().as_str() {
+        "NORMAL" => Some(crate::ir::GitGraphCommitType::Normal),
+        "REVERSE" => Some(crate::ir::GitGraphCommitType::Reverse),
+        "HIGHLIGHT" => Some(crate::ir::GitGraphCommitType::Highlight),
+        _ => None,
+    }
+}
+
+fn extract_gitgraph_order(line: &str) -> Option<f32> {
+    let raw = extract_gitgraph_attr(line, "order")?;
+    raw.parse::<f32>().ok()
+}
+
+fn extract_gitgraph_tags(line: &str) -> Vec<String> {
+    extract_gitgraph_attrs(line, "tag")
+}
+
+fn extract_gitgraph_attrs(line: &str, key: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let lower = line.to_ascii_lowercase();
+    let needle = format!("{}:", key);
+    let mut start = 0;
+    while let Some(idx) = lower[start..].find(&needle) {
+        let offset = start + idx;
+        if let Some((value, next)) = extract_gitgraph_attr_at(line, offset + needle.len()) {
+            values.push(value);
+            start = next;
+        } else {
+            break;
+        }
+    }
+    values
+}
+
+fn extract_gitgraph_attr_at(line: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = line.as_bytes();
+    let mut idx = start;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    if idx >= bytes.len() {
+        return None;
+    }
+    let first = bytes[idx] as char;
+    if first == '"' || first == '\'' {
+        idx += 1;
+        let begin = idx;
+        while idx < bytes.len() && bytes[idx] as char != first {
+            idx += 1;
+        }
+        let value = String::from_utf8_lossy(&bytes[begin..idx]).to_string();
+        let next = (idx + 1).min(bytes.len());
+        return Some((value, next));
+    }
+    let begin = idx;
+    while idx < bytes.len() && !bytes[idx].is_ascii_whitespace() && bytes[idx] != b',' {
+        idx += 1;
+    }
+    let value = String::from_utf8_lossy(&bytes[begin..idx]).to_string();
+    Some((value, idx))
+}
+
+fn hash_seed(input: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    input.hash(&mut hasher);
+    hasher.finish()
+}
+
+struct GitGraphIdRng {
+    state: u64,
+}
+
+impl GitGraphIdRng {
+    fn new(seed: u64) -> Self {
+        let seed = if seed == 0 { 0xA5A5_A5A5_5A5A_5A5A } else { seed };
+        Self { state: seed }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        // xorshift64*
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        (x >> 32) as u32
+    }
+
+    fn next_hex(&mut self, len: usize) -> String {
+        let mut out = String::with_capacity(len);
+        for _ in 0..len {
+            let val = (self.next_u32() & 0xF) as u8;
+            out.push(std::char::from_digit(val as u32, 16).unwrap_or('0'));
+        }
+        out
+    }
 }
 
 fn extract_gitgraph_attr(line: &str, key: &str) -> Option<String> {
@@ -2246,8 +2667,22 @@ fn parse_c4_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::C4;
     graph.direction = Direction::LeftRight;
+    graph.c4 = crate::ir::C4Data::default();
+    graph.c4.boundaries.push(crate::ir::C4Boundary {
+        id: "global".to_string(),
+        label: "global".to_string(),
+        boundary_type: "global".to_string(),
+        descr: None,
+        sprite: None,
+        tags: None,
+        link: None,
+        parent_boundary: String::new(),
+        bg_color: None,
+        border_color: None,
+        font_color: None,
+    });
     let (lines, init_config) = preprocess_input(input)?;
-    let mut boundary_stack: Vec<usize> = Vec::new();
+    let mut boundary_stack: Vec<String> = vec!["global".to_string()];
 
     for raw_line in lines {
         let line = raw_line.trim();
@@ -2256,10 +2691,13 @@ fn parse_c4_diagram(input: &str) -> Result<ParseOutput> {
         }
         let lower = line.to_ascii_lowercase();
         if lower.starts_with("c4") {
+            graph.c4.c4_type = Some(line.trim().to_string());
             continue;
         }
         if line == "}" || lower == "end" {
-            boundary_stack.pop();
+            if boundary_stack.len() > 1 {
+                boundary_stack.pop();
+            }
             continue;
         }
 
@@ -2267,79 +2705,285 @@ fn parse_c4_diagram(input: &str) -> Result<ParseOutput> {
             let before = line[..brace_idx].trim();
             let after = line[brace_idx + 1..].trim();
             if !before.is_empty() {
-                process_c4_line(before, &mut graph, &mut boundary_stack);
+                process_c4_line(before, &mut graph.c4, &mut boundary_stack);
             }
             if !after.is_empty() {
                 let closes = after.ends_with('}');
                 let after_trimmed = after.trim_end_matches('}').trim();
                 if !after_trimmed.is_empty() {
-                    process_c4_line(after_trimmed, &mut graph, &mut boundary_stack);
+                    process_c4_line(after_trimmed, &mut graph.c4, &mut boundary_stack);
                 }
                 if closes {
-                    boundary_stack.pop();
+                    if boundary_stack.len() > 1 {
+                        boundary_stack.pop();
+                    }
                 }
             }
             continue;
         }
 
-        process_c4_line(line, &mut graph, &mut boundary_stack);
+        process_c4_line(line, &mut graph.c4, &mut boundary_stack);
     }
 
     Ok(ParseOutput { graph, init_config })
 }
 
-fn process_c4_line(line: &str, graph: &mut Graph, boundary_stack: &mut Vec<usize>) {
+fn process_c4_line(line: &str, c4: &mut crate::ir::C4Data, boundary_stack: &mut Vec<String>) {
     if let Some((func, args)) = parse_function_call(line) {
         let func_lower = func.to_ascii_lowercase();
-        if func_lower.contains("boundary") {
-            let id = args
+        let (positional, kv) = parse_c4_args(&args);
+        if is_c4_boundary(&func_lower) {
+            let id = positional
                 .get(0)
                 .cloned()
-                .unwrap_or_else(|| format!("boundary_{}", graph.subgraphs.len()));
-            let label = args.get(1).cloned().unwrap_or_else(|| id.clone());
-            graph.subgraphs.push(Subgraph {
-                id: Some(id),
+                .unwrap_or_else(|| format!("boundary_{}", c4.boundaries.len()));
+            let label = positional.get(1).cloned().unwrap_or_else(|| id.clone());
+            let mut boundary_type = positional.get(2).cloned();
+            if let Some(value) = kv.get("type") {
+                boundary_type = Some(value.clone());
+            }
+            let boundary_type = boundary_type.unwrap_or_else(|| c4_boundary_default_type(&func_lower));
+            let descr = kv
+                .get("descr")
+                .or_else(|| kv.get("description"))
+                .cloned();
+            let sprite = kv.get("sprite").cloned();
+            let tags = kv.get("tags").cloned();
+            let link = kv.get("link").cloned();
+            let parent_boundary = boundary_stack.last().cloned().unwrap_or_default();
+            c4.boundaries.push(crate::ir::C4Boundary {
+                id: id.clone(),
                 label,
-                nodes: Vec::new(),
-                direction: None,
+                boundary_type,
+                descr,
+                sprite,
+                tags,
+                link,
+                parent_boundary,
+                bg_color: None,
+                border_color: None,
+                font_color: None,
             });
-            boundary_stack.push(graph.subgraphs.len() - 1);
+            boundary_stack.push(id);
             return;
         }
-        if func_lower.starts_with("rel") {
-            if args.len() >= 2 {
-                let from = args[0].clone();
-                let to = args[1].clone();
-                let label = args.get(2).cloned();
-                graph.ensure_node(&from, None, Some(crate::ir::NodeShape::Rectangle));
-                graph.ensure_node(&to, None, Some(crate::ir::NodeShape::Rectangle));
-                graph.edges.push(crate::ir::Edge {
+        if let Some(rel_kind) = c4_rel_kind_for(&func_lower) {
+            let mut rel_args = positional;
+            if func_lower.starts_with("relindex") && rel_args.len() > 1 {
+                rel_args.remove(0);
+            }
+            if rel_args.len() >= 3 {
+                let from = rel_args[0].clone();
+                let to = rel_args[1].clone();
+                let label = rel_args[2].clone();
+                let techn = rel_args.get(3).cloned().or_else(|| kv.get("techn").cloned());
+                let descr = rel_args.get(4).cloned().or_else(|| kv.get("descr").cloned());
+                let sprite = rel_args.get(5).cloned().or_else(|| kv.get("sprite").cloned());
+                let tags = rel_args.get(6).cloned().or_else(|| kv.get("tags").cloned());
+                let link = rel_args.get(7).cloned().or_else(|| kv.get("link").cloned());
+                c4.rels.push(crate::ir::C4Rel {
+                    kind: rel_kind,
                     from,
                     to,
                     label,
-                    start_label: None,
-                    end_label: None,
-                    directed: true,
-                    arrow_start: false,
-                    arrow_end: true,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
+                    techn,
+                    descr,
+                    sprite,
+                    tags,
+                    link,
+                    offset_x: 0.0,
+                    offset_y: 0.0,
+                    line_color: None,
+                    text_color: None,
                 });
             }
             return;
         }
 
-        if let Some(id) = args.get(0).cloned() {
-            let label = args.get(1).cloned().unwrap_or_else(|| id.clone());
-            let shape = c4_shape_for(&func_lower);
-            graph.ensure_node(&id, Some(label), Some(shape));
-            if let Some(idx) = boundary_stack.last().copied() {
-                if let Some(subgraph) = graph.subgraphs.get_mut(idx) {
-                    subgraph.nodes.push(id);
+        if func_lower == "updateelementstyle"
+            || func_lower == "update_el_style"
+            || func_lower == "updateelstyle"
+        {
+            let element = positional
+                .get(0)
+                .cloned()
+                .or_else(|| get_c4_kv(&kv, "element"));
+            if let Some(element) = element {
+                let bg_color = get_c4_kv(&kv, "bgColor").or_else(|| positional.get(1).cloned());
+                let font_color = get_c4_kv(&kv, "fontColor").or_else(|| positional.get(2).cloned());
+                let border_color =
+                    get_c4_kv(&kv, "borderColor").or_else(|| positional.get(3).cloned());
+                let sprite = get_c4_kv(&kv, "sprite").or_else(|| positional.get(6).cloned());
+                let techn = get_c4_kv(&kv, "techn").or_else(|| positional.get(7).cloned());
+
+                if let Some(shape) = c4.shapes.iter_mut().find(|s| s.id == element) {
+                    if let Some(val) = bg_color {
+                        shape.bg_color = Some(val);
+                    }
+                    if let Some(val) = font_color {
+                        shape.font_color = Some(val);
+                    }
+                    if let Some(val) = border_color {
+                        shape.border_color = Some(val);
+                    }
+                    if let Some(val) = sprite {
+                        shape.sprite = Some(val);
+                    }
+                    if let Some(val) = techn {
+                        shape.techn = Some(val);
+                    }
+                } else if let Some(boundary) = c4.boundaries.iter_mut().find(|b| b.id == element) {
+                    if let Some(val) = bg_color {
+                        boundary.bg_color = Some(val);
+                    }
+                    if let Some(val) = font_color {
+                        boundary.font_color = Some(val);
+                    }
+                    if let Some(val) = border_color {
+                        boundary.border_color = Some(val);
+                    }
+                    if let Some(val) = sprite {
+                        boundary.sprite = Some(val);
+                    }
                 }
+            }
+            return;
+        }
+
+        if func_lower == "updaterelstyle" || func_lower == "update_rel_style" {
+            let from = positional
+                .get(0)
+                .cloned()
+                .or_else(|| get_c4_kv(&kv, "from"));
+            let to = positional
+                .get(1)
+                .cloned()
+                .or_else(|| get_c4_kv(&kv, "to"));
+            if let (Some(from), Some(to)) = (from, to) {
+                if let Some(rel) = c4.rels.iter_mut().find(|r| r.from == from && r.to == to) {
+                    let text_color = get_c4_kv(&kv, "textColor").or_else(|| positional.get(2).cloned());
+                    let line_color = get_c4_kv(&kv, "lineColor").or_else(|| positional.get(3).cloned());
+                    let offset_x = get_c4_kv(&kv, "offsetX").or_else(|| positional.get(4).cloned());
+                    let offset_y = get_c4_kv(&kv, "offsetY").or_else(|| positional.get(5).cloned());
+                    if let Some(val) = text_color {
+                        rel.text_color = Some(val);
+                    }
+                    if let Some(val) = line_color {
+                        rel.line_color = Some(val);
+                    }
+                    if let Some(val) = offset_x {
+                        if let Ok(num) = val.trim().parse::<f32>() {
+                            rel.offset_x = num;
+                        }
+                    }
+                    if let Some(val) = offset_y {
+                        if let Ok(num) = val.trim().parse::<f32>() {
+                            rel.offset_y = num;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        if func_lower == "updatelayoutconfig" || func_lower == "update_layout_config" {
+            let shape_in_row = get_c4_kv(&kv, "c4ShapeInRow")
+                .or_else(|| positional.get(0).cloned());
+            let boundary_in_row = get_c4_kv(&kv, "c4BoundaryInRow")
+                .or_else(|| positional.get(1).cloned());
+            if let Some(val) = shape_in_row {
+                if let Ok(num) = val.trim().parse::<usize>() {
+                    if num >= 1 {
+                        c4.c4_shape_in_row_override = Some(num);
+                    }
+                }
+            }
+            if let Some(val) = boundary_in_row {
+                if let Ok(num) = val.trim().parse::<usize>() {
+                    if num >= 1 {
+                        c4.c4_boundary_in_row_override = Some(num);
+                    }
+                }
+            }
+            return;
+        }
+
+        if let Some(kind) = c4_shape_kind_for(&func_lower) {
+            if let Some(id) = positional.get(0).cloned() {
+                let label = positional.get(1).cloned().unwrap_or_else(|| id.clone());
+                let mut type_label: Option<String> = None;
+                let mut techn: Option<String> = None;
+                let mut descr: Option<String> = None;
+                let mut sprite: Option<String> = None;
+                let mut tags: Option<String> = None;
+                let mut link: Option<String> = None;
+                if let Some(value) = kv.get("type") {
+                    type_label = Some(value.clone());
+                }
+                if let Some(value) = kv.get("techn").or_else(|| kv.get("technology")) {
+                    techn = Some(value.clone());
+                }
+                if let Some(value) = kv.get("descr").or_else(|| kv.get("description")) {
+                    descr = Some(value.clone());
+                }
+                if let Some(value) = kv.get("sprite") {
+                    sprite = Some(value.clone());
+                }
+                if let Some(value) = kv.get("tags") {
+                    tags = Some(value.clone());
+                }
+                if let Some(value) = kv.get("link") {
+                    link = Some(value.clone());
+                }
+                if kind_uses_techn(kind) {
+                    if techn.is_none() {
+                        techn = positional.get(2).cloned();
+                    }
+                    if descr.is_none() {
+                        descr = positional.get(3).cloned();
+                    }
+                    if sprite.is_none() {
+                        sprite = positional.get(4).cloned();
+                    }
+                    if tags.is_none() {
+                        tags = positional.get(5).cloned();
+                    }
+                    if link.is_none() {
+                        link = positional.get(6).cloned();
+                    }
+                } else {
+                    if type_label.is_none() {
+                        type_label = positional.get(2).cloned();
+                    }
+                    if descr.is_none() {
+                        descr = positional.get(3).cloned();
+                    }
+                    if sprite.is_none() {
+                        sprite = positional.get(4).cloned();
+                    }
+                    if tags.is_none() {
+                        tags = positional.get(5).cloned();
+                    }
+                    if link.is_none() {
+                        link = positional.get(6).cloned();
+                    }
+                }
+                let parent_boundary = boundary_stack.last().cloned().unwrap_or_default();
+                c4.shapes.push(crate::ir::C4Shape {
+                    id,
+                    label,
+                    type_label,
+                    techn,
+                    descr,
+                    sprite,
+                    tags,
+                    link,
+                    parent_boundary,
+                    kind,
+                    bg_color: None,
+                    border_color: None,
+                    font_color: None,
+                });
             }
         }
     }
@@ -2399,14 +3043,156 @@ fn split_args(input: &str) -> Vec<String> {
     args
 }
 
-fn c4_shape_for(kind: &str) -> crate::ir::NodeShape {
-    if kind.contains("person") {
-        return crate::ir::NodeShape::ActorBox;
+fn parse_c4_args(args: &[String]) -> (Vec<String>, std::collections::HashMap<String, String>) {
+    let mut positional = Vec::new();
+    let mut kv = std::collections::HashMap::new();
+    for arg in args {
+        let trimmed = arg.trim();
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let key = key.trim().trim_start_matches('$');
+            let value = value.trim();
+            if !key.is_empty() {
+                kv.insert(key.to_string(), value.to_string());
+                continue;
+            }
+        }
+        if !trimmed.is_empty() {
+            positional.push(trimmed.to_string());
+        }
     }
-    if kind.contains("db") || kind.contains("database") {
-        return crate::ir::NodeShape::Cylinder;
+    (positional, kv)
+}
+
+fn normalize_c4_key(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    for ch in key.chars() {
+        if ch == '_' || ch == '-' {
+            continue;
+        }
+        out.push(ch.to_ascii_lowercase());
     }
-    crate::ir::NodeShape::Rectangle
+    out
+}
+
+fn get_c4_kv(
+    kv: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> Option<String> {
+    let target = normalize_c4_key(key);
+    kv.iter()
+        .find(|(k, _)| normalize_c4_key(k) == target)
+        .map(|(_, v)| v.clone())
+}
+
+fn is_c4_boundary(func_lower: &str) -> bool {
+    func_lower.contains("boundary") || func_lower.starts_with("deployment_node") || func_lower == "node" || func_lower == "node_l" || func_lower == "node_r"
+}
+
+fn c4_boundary_default_type(func_lower: &str) -> String {
+    if func_lower.contains("enterprise") {
+        "enterprise".to_string()
+    } else if func_lower.contains("container") {
+        "container".to_string()
+    } else if func_lower.contains("system") {
+        "system".to_string()
+    } else if func_lower.contains("node") {
+        "node".to_string()
+    } else {
+        "system".to_string()
+    }
+}
+
+fn c4_shape_kind_for(func_lower: &str) -> Option<crate::ir::C4ShapeKind> {
+    let f = func_lower.replace('-', "_");
+    let is_ext = f.contains("ext");
+    if f.contains("person") {
+        return Some(if is_ext {
+            crate::ir::C4ShapeKind::ExternalPerson
+        } else {
+            crate::ir::C4ShapeKind::Person
+        });
+    }
+    if f.contains("system") {
+        let is_db = f.contains("db");
+        let is_queue = f.contains("queue");
+        return Some(match (is_ext, is_db, is_queue) {
+            (true, true, _) => crate::ir::C4ShapeKind::ExternalSystemDb,
+            (true, _, true) => crate::ir::C4ShapeKind::ExternalSystemQueue,
+            (true, _, _) => crate::ir::C4ShapeKind::ExternalSystem,
+            (false, true, _) => crate::ir::C4ShapeKind::SystemDb,
+            (false, _, true) => crate::ir::C4ShapeKind::SystemQueue,
+            (false, _, _) => crate::ir::C4ShapeKind::System,
+        });
+    }
+    if f.contains("container") {
+        let is_db = f.contains("db");
+        let is_queue = f.contains("queue");
+        return Some(match (is_ext, is_db, is_queue) {
+            (true, true, _) => crate::ir::C4ShapeKind::ExternalContainerDb,
+            (true, _, true) => crate::ir::C4ShapeKind::ExternalContainerQueue,
+            (true, _, _) => crate::ir::C4ShapeKind::ExternalContainer,
+            (false, true, _) => crate::ir::C4ShapeKind::ContainerDb,
+            (false, _, true) => crate::ir::C4ShapeKind::ContainerQueue,
+            (false, _, _) => crate::ir::C4ShapeKind::Container,
+        });
+    }
+    if f.contains("component") {
+        let is_db = f.contains("db");
+        let is_queue = f.contains("queue");
+        return Some(match (is_ext, is_db, is_queue) {
+            (true, true, _) => crate::ir::C4ShapeKind::ExternalComponentDb,
+            (true, _, true) => crate::ir::C4ShapeKind::ExternalComponentQueue,
+            (true, _, _) => crate::ir::C4ShapeKind::ExternalComponent,
+            (false, true, _) => crate::ir::C4ShapeKind::ComponentDb,
+            (false, _, true) => crate::ir::C4ShapeKind::ComponentQueue,
+            (false, _, _) => crate::ir::C4ShapeKind::Component,
+        });
+    }
+    None
+}
+
+fn kind_uses_techn(kind: crate::ir::C4ShapeKind) -> bool {
+    matches!(
+        kind,
+        crate::ir::C4ShapeKind::Container
+            | crate::ir::C4ShapeKind::ContainerDb
+            | crate::ir::C4ShapeKind::ContainerQueue
+            | crate::ir::C4ShapeKind::ExternalContainer
+            | crate::ir::C4ShapeKind::ExternalContainerDb
+            | crate::ir::C4ShapeKind::ExternalContainerQueue
+            | crate::ir::C4ShapeKind::Component
+            | crate::ir::C4ShapeKind::ComponentDb
+            | crate::ir::C4ShapeKind::ComponentQueue
+            | crate::ir::C4ShapeKind::ExternalComponent
+            | crate::ir::C4ShapeKind::ExternalComponentDb
+            | crate::ir::C4ShapeKind::ExternalComponentQueue
+    )
+}
+
+fn c4_rel_kind_for(func_lower: &str) -> Option<crate::ir::C4RelKind> {
+    let f = func_lower.replace('-', "_");
+    if f.starts_with("birel") {
+        return Some(crate::ir::C4RelKind::BiRel);
+    }
+    if f.starts_with("rel_u") || f.starts_with("rel_up") {
+        return Some(crate::ir::C4RelKind::RelUp);
+    }
+    if f.starts_with("rel_d") || f.starts_with("rel_down") {
+        return Some(crate::ir::C4RelKind::RelDown);
+    }
+    if f.starts_with("rel_l") || f.starts_with("rel_left") {
+        return Some(crate::ir::C4RelKind::RelLeft);
+    }
+    if f.starts_with("rel_r") || f.starts_with("rel_right") {
+        return Some(crate::ir::C4RelKind::RelRight);
+    }
+    if f.starts_with("rel_b") || f.starts_with("rel_back") {
+        return Some(crate::ir::C4RelKind::RelBack);
+    }
+    if f.starts_with("rel") || f.starts_with("relindex") {
+        return Some(crate::ir::C4RelKind::Rel);
+    }
+    None
 }
 
 fn parse_sankey_diagram(input: &str) -> Result<ParseOutput> {
@@ -2519,6 +3305,12 @@ fn parse_quadrant_diagram(input: &str) -> Result<ParseOutput> {
         }
         // Parse data points: Campaign A: [0.3, 0.6]
         if let Some((label, x, y)) = parse_quadrant_point_coords(line) {
+            let node_id = format!("quadrant_{}", graph.nodes.len());
+            graph.ensure_node(
+                &node_id,
+                Some(label.clone()),
+                Some(crate::ir::NodeShape::Rectangle),
+            );
             graph.quadrant.points.push(crate::ir::QuadrantPoint { label, x, y });
         }
     }
@@ -3109,11 +3901,7 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
         }
         if lower.starts_with("x-axis") {
             let rest = line.get(6..).unwrap_or("").trim();
-            x_labels = split_args(rest)
-                .into_iter()
-                .map(|value| strip_quotes(value.trim()))
-                .filter(|value| !value.is_empty())
-                .collect();
+            x_labels = parse_xy_axis_categories(rest);
             continue;
         }
         if lower.starts_with("y-axis") {
@@ -3148,6 +3936,39 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
     }
 
     Ok(ParseOutput { graph, init_config })
+}
+
+fn parse_xy_axis_categories(rest: &str) -> Vec<String> {
+    let trimmed = rest.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let categories = if let Some(open) = trimmed.find('[') {
+        if let Some(close) = trimmed.rfind(']') {
+            if close > open {
+                &trimmed[open + 1..close]
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+
+    split_args(categories)
+        .into_iter()
+        .map(|value| {
+            let cleaned = value
+                .trim()
+                .trim_matches(|ch| ch == '[' || ch == ']')
+                .trim();
+            strip_quotes(cleaned)
+        })
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn parse_xy_series_line(line: &str) -> Option<(String, Vec<String>)> {
@@ -3233,6 +4054,7 @@ fn parse_state_diagram(input: &str) -> Result<ParseOutput> {
                         text_color: None,
                         stroke_width: Some(0.0),
                         stroke_dasharray: None,
+                        line_color: None,
                     },
                 );
             }
@@ -4019,6 +4841,57 @@ fn mask_bracket_content(line: &str) -> String {
     result
 }
 
+fn split_edge_chain(line: &str) -> Option<Vec<String>> {
+    let masked = mask_bracket_content(line);
+    if LABEL_ARROW_RE.is_match(&masked) {
+        return None;
+    }
+
+    let matches: Vec<regex::Match> = ARROW_TOKEN_RE.find_iter(&masked).collect();
+    if matches.len() < 2 {
+        return None;
+    }
+
+    let mut nodes: Vec<String> = Vec::with_capacity(matches.len() + 1);
+    let mut arrows: Vec<String> = Vec::with_capacity(matches.len());
+    let mut last_idx = 0usize;
+
+    for m in matches {
+        nodes.push(line[last_idx..m.start()].trim().to_string());
+        arrows.push(line[m.start()..m.end()].trim().to_string());
+        last_idx = m.end();
+    }
+    nodes.push(line[last_idx..].trim().to_string());
+
+    if nodes.len() != arrows.len() + 1 {
+        return None;
+    }
+
+    // Attach leading pipe labels to the preceding arrow and strip them from the node token.
+    for i in 1..nodes.len() {
+        let trimmed = nodes[i].trim_start();
+        if let Some(stripped) = trimmed.strip_prefix('|')
+            && let Some(end_idx) = stripped.find('|')
+        {
+            let label_len = end_idx + 2;
+            let label = &trimmed[..label_len];
+            let rest = trimmed[label_len..].trim_start();
+            arrows[i - 1].push_str(label);
+            nodes[i] = rest.to_string();
+        }
+    }
+
+    if nodes.iter().any(|node| node.is_empty()) {
+        return None;
+    }
+
+    let mut statements = Vec::with_capacity(arrows.len());
+    for i in 0..arrows.len() {
+        statements.push(format!("{} {} {}", nodes[i], arrows[i], nodes[i + 1]));
+    }
+    Some(statements)
+}
+
 fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMeta)> {
     // Mask bracket content to prevent matching dashes inside labels like A[wi-fi]
     let masked = mask_bracket_content(line);
@@ -4032,14 +4905,13 @@ fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMe
         let left_match = caps.name("left")?;
         let right_match = caps.name("right")?;
         let label_match = caps.name("label")?;
+        let arrow_match = caps.name("arrow")?;
         let left = extract(left_match).trim();
         let right = extract(right_match).trim();
         let label_clean = extract(label_match).trim();
         if !label_clean.is_empty() && !left.is_empty() && !right.is_empty() {
-            let arrow1 = caps.name("arrow1")?.as_str();
-            let arrow2 = caps.name("arrow2")?.as_str();
-            let arrow = format!("{}{}", arrow1, arrow2);
-            let edge_meta = parse_edge_meta(&arrow);
+            let arrow = extract(arrow_match).trim();
+            let edge_meta = parse_edge_meta(arrow);
             return Some((
                 left.to_string(),
                 Some(label_clean.to_string()),
@@ -4753,6 +5625,14 @@ mod tests {
         assert_eq!(parsed.graph.edges.len(), 2);
         assert_eq!(parsed.graph.edges[0].label.as_deref(), Some("needs review"));
         assert_eq!(parsed.graph.edges[1].label.as_deref(), Some("ship it"));
+    }
+
+    #[test]
+    fn parse_pipe_edge_label() {
+        let input = "flowchart LR\nA -->|yes| B";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(parsed.graph.edges[0].label.as_deref(), Some("yes"));
     }
 
     #[test]

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZenUML 中文支持测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-title {
+            font-weight: bold;
+            color: #1890ff;
+            margin-bottom: 10px;
+        }
+        .code-input {
+            width: 100%;
+            min-height: 150px;
+            font-family: 'Courier New', monospace;
+            padding: 10px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .render-button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .render-button:hover {
+            background-color: #40a9ff;
+        }
+        #diagram-container {
+            min-height: 400px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            margin-top: 10px;
+            background: white;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #f6ffed;
+            border: 1px solid #b7eb8f;
+            color: #52c41a;
+        }
+        .status.error {
+            background-color: #fff1f0;
+            border: 1px solid #ffccc7;
+            color: #ff4d4f;
+        }
+    </style>
+</head>
+<body>
+    <h1>ZenUML 中文字符支持测试</h1>
+    
+    <div class="test-section">
+        <div class="test-title">测试 1: 基本中文标识符（无空格）</div>
+        <textarea id="test1" class="code-input">// 中文参与者和方法名
+用户 订单服务 支付系统
+
+用户.登录()
+订单服务.创建订单()
+支付系统.处理支付()
+return 成功</textarea>
+        <button onclick="renderDiagram('test1')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">测试 2: 包含空格的中文（使用引号）</div>
+        <textarea id="test2" class="code-input">// 使用引号处理包含空格的中文
+"用户 服务" "订单 管理" "支付 网关"
+
+"用户 服务"."获取 用户信息"()
+"订单 管理"."创建 新订单"()
+"支付 网关"."处理 支付请求"()
+return "操作 成功"</textarea>
+        <button onclick="renderDiagram('test2')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">测试 3: 中英文混合</div>
+        <textarea id="test3" class="code-input">// 中英文混合使用
+UserService 数据库 CacheManager
+
+UserService.获取用户()
+数据库.query("SELECT * FROM users")
+CacheManager.缓存结果()
+return 用户数据</textarea>
+        <button onclick="renderDiagram('test3')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">测试 4: 复杂场景</div>
+        <textarea id="test4" class="code-input">// 复杂的中文场景
+title "订单处理流程"
+
+@Actor 用户
+@Database 数据库
+@Service 订单服务
+
+用户->订单服务: 创建订单
+订单服务.验证订单() {
+    if (库存充足) {
+        数据库.保存订单()
+        return "订单创建成功"
+    } else {
+        return "库存不足"
+    }
+}</textarea>
+        <button onclick="renderDiagram('test4')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">测试 5: 其他语言支持</div>
+        <textarea id="test5" class="code-input">// 测试日文、韩文、阿拉伯文、俄文
+ユーザー サービス データベース
+
+// 日文
+ユーザー.ログイン()
+
+// 韩文
+사용자.로그인()
+
+// 俄文
+Пользователь.Войти()
+
+// 阿拉伯文（从右到左语言）
+مستخدم.دخول()</textarea>
+        <button onclick="renderDiagram('test5')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">自定义测试</div>
+        <textarea id="custom" class="code-input" placeholder="在这里输入您的 ZenUML 代码..."></textarea>
+        <button onclick="renderDiagram('custom')" class="render-button">渲染图表</button>
+    </div>
+
+    <div class="test-section">
+        <div class="test-title">渲染结果</div>
+        <div id="diagram-container"></div>
+        <div id="status"></div>
+    </div>
+
+    <script type="module">
+        import { ZenUml } from '/src/core.tsx';
+        
+        window.zenUmlInstance = null;
+        
+        window.renderDiagram = function(testId) {
+            const code = document.getElementById(testId).value;
+            const container = document.getElementById('diagram-container');
+            const statusDiv = document.getElementById('status');
+            
+            try {
+                // 清空容器
+                container.innerHTML = '';
+                
+                // 如果已有实例，先销毁
+                if (window.zenUmlInstance) {
+                    window.zenUmlInstance.destroy();
+                }
+                
+                // 创建新实例
+                window.zenUmlInstance = new ZenUml(container);
+                window.zenUmlInstance.render(code);
+                
+                statusDiv.className = 'status success';
+                statusDiv.textContent = '✅ 渲染成功！中文支持正常工作。';
+            } catch (error) {
+                console.error('渲染错误:', error);
+                statusDiv.className = 'status error';
+                statusDiv.textContent = `❌ 渲染失败: ${error.message}`;
+            }
+        }
+        
+        // 页面加载时渲染第一个示例
+        window.addEventListener('load', () => {
+            setTimeout(() => renderDiagram('test1'), 100);
+        });
+    </script>
+</body>
+</html>

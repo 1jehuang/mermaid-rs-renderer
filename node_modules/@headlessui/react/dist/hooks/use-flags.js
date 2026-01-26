@@ -1,0 +1,1 @@
+import{useCallback as t,useState as b}from"react";function c(u=0){let[r,a]=b(u),g=t(e=>a(e),[]),s=t(e=>a(l=>l|e),[]),m=t(e=>(r&e)===e,[r]),n=t(e=>a(l=>l&~e),[]),F=t(e=>a(l=>l^e),[]);return{flags:r,setFlag:g,addFlag:s,hasFlag:m,removeFlag:n,toggleFlag:F}}export{c as useFlags};

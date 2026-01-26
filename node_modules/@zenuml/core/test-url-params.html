@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Parameter Test</title>
+</head>
+<body>
+    <h1>URL Parameter Extraction Test</h1>
+    <div id="test-results"></div>
+    
+    <script>
+        // Utility function to escape HTML special characters
+        function escapeHTML(str) {
+            return str.replace(/[&<>"']/g, (char) => {
+                const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+                return escapeMap[char];
+            });
+        }
+        
+        // Copy the URL parameter extraction functions from renderer.html
+        function extractCodeFromURL() {
+            try {
+                console.log('Extracting code parameter from URL...');
+                
+                // Get current URL
+                const currentUrl = new URL(window.location.href);
+                console.log('Current URL:', currentUrl.href);
+                
+                // Extract the 'code' parameter
+                const codeParam = currentUrl.searchParams.get('code');
+                
+                if (codeParam) {
+                    console.log('Code parameter found:', codeParam.substring(0, 50) + '...');
+                    return codeParam;
+                } else {
+                    console.log('No code parameter found in URL');
+                    return null;
+                }
+            } catch (error) {
+                console.error('Error extracting code from URL:', error);
+                return null;
+            }
+        }
+
+        function hasCodeParameter() {
+            try {
+                const currentUrl = new URL(window.location.href);
+                return currentUrl.searchParams.has('code');
+            } catch (error) {
+                console.error('Error checking for code parameter:', error);
+                return false;
+            }
+        }
+
+        // Base64 decoding functions (copied from renderer.html)
+        function decodeBase64(encodedString) {
+            try {
+                console.log('Attempting to decode Base64 string...');
+                
+                // Check if the string is valid Base64
+                if (!encodedString || typeof encodedString !== 'string') {
+                    throw new Error('Invalid input: string is null, undefined, or not a string');
+                }
+                
+                // Remove any whitespace
+                const cleanedString = encodedString.trim();
+                
+                // Check if string looks like Base64 (basic validation)
+                const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+                if (!base64Regex.test(cleanedString)) {
+                    throw new Error('Invalid Base64 format');
+                }
+                
+                // Attempt to decode
+                const decodedString = atob(cleanedString);
+                console.log('Base64 decoding successful');
+                
+                return decodedString;
+            } catch (error) {
+                console.error('Base64 decoding failed:', error);
+                throw new Error(`Base64 decoding failed: ${error.message}`);
+            }
+        }
+
+        function processURLCodeParameter(encodedCode) {
+            try {
+                console.log('Processing URL code parameter...');
+                
+                if (!encodedCode) {
+                    console.log('No encoded code provided');
+                    return null;
+                }
+                
+                // Try to decode as Base64
+                const decodedCode = decodeBase64(encodedCode);
+                console.log('Code parameter successfully decoded from Base64');
+                
+                return decodedCode;
+            } catch (error) {
+                console.error('Failed to process URL code parameter:', error);
+                
+                // Return the original code as fallback (might be plain text)
+                console.log('Falling back to using raw parameter value');
+                return encodedCode;
+            }
+        }
+        
+        // Test the functions
+        function runTests() {
+            const resultsDiv = document.getElementById('test-results');
+            let results = '<h2>Test Results:</h2>';
+            
+            // Test 1: Check current URL
+            const currentUrl = window.location.href;
+            results += `<p><strong>Current URL:</strong> ${escapeHTML(currentUrl)}</p>`;
+            
+            // Test 2: Check if code parameter exists
+            const hasCode = hasCodeParameter();
+            results += `<p><strong>Has code parameter:</strong> ${hasCode}</p>`;
+            
+            // Test 3: Extract code parameter
+            const codeParam = extractCodeFromURL();
+            results += `<p><strong>Extracted code parameter:</strong> ${escapeHTML(codeParam) || 'null'}</p>`;
+            
+            // Test 4: Process URL code parameter (includes Base64 decoding)
+            if (codeParam) {
+                try {
+                    const processedCode = processURLCodeParameter(codeParam);
+                    results += `<p><strong>Processed code (after Base64 decoding):</strong></p>`;
+                    results += `<pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; white-space: pre-wrap;">${processedCode || 'null'}</pre>`;
+                    
+                    // Check if it was actually Base64 decoded
+                    if (processedCode !== codeParam) {
+                        results += `<p style="color: green;"><strong>✓ Base64 decoding successful!</strong></p>`;
+                    } else {
+                        results += `<p style="color: orange;"><strong>⚠ Used raw parameter (not Base64 or decoding failed)</strong></p>`;
+                    }
+                } catch (error) {
+                    results += `<p style="color: red;"><strong>✗ Error processing code parameter:</strong> ${error.message}</p>`;
+                }
+            }
+            
+            // Test 5: Show all URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            results += '<p><strong>All URL parameters:</strong></p><ul>';
+            for (const [key, value] of urlParams) {
+                results += `<li>${escapeHTML(key)}: ${escapeHTML(value)}</li>`;
+            }
+            results += '</ul>';
+            
+            resultsDiv.innerHTML = results;
+        }
+        
+        // Run tests when page loads
+        window.addEventListener('load', runTests);
+    </script>
+    
+    <h2>Test Instructions:</h2>
+    <p>To test URL parameter extraction and Base64 decoding, add parameters to the URL:</p>
+    <ul>
+        <li><a href="?code=test123">Test with simple code parameter</a></li>
+        <li><a href="?code=dGVzdCBjb2Rl">Test with Base64 code parameter ("test code")</a></li>
+        <li><a href="?code=SGVsbG8gV29ybGQ=">Test with Base64 code parameter ("Hello World")</a></li>
+        <li><a href="?code=QS5tZXRob2QoKSB7IEIucHJvY2VzcygpIH0=">Test with Base64 ZenUML code</a></li>
+        <li><a href="?code=test123&theme=dark">Test with multiple parameters</a></li>
+        <li><a href="?code=invalid@base64!">Test with invalid Base64 (should fallback)</a></li>
+        <li><a href="?other=value">Test with no code parameter</a></li>
+    </ul>
+    
+    <h3>Base64 Encoding Helper:</h3>
+    <p>Enter text to encode as Base64:</p>
+    <input type="text" id="textInput" placeholder="Enter text to encode" style="width: 300px; padding: 5px;">
+    <button onclick="encodeText()" style="padding: 5px 10px;">Encode to Base64</button>
+    <p>Base64 result: <span id="base64Result" style="font-family: monospace; background: #f0f0f0; padding: 2px 4px;"></span></p>
+    
+    <script>
+        function encodeText() {
+            const text = document.getElementById('textInput').value;
+            if (text) {
+                const encoded = btoa(text);
+                document.getElementById('base64Result').textContent = encoded;
+                
+                // Create a test link
+                const testUrl = `?code=${encoded}`;
+                document.getElementById('base64Result').innerHTML = 
+                    `${encoded} <br><a href="${testUrl}" style="font-size: 12px;">Test this Base64 code</a>`;
+            }
+        }
+    </script>
+</body>
+</html>

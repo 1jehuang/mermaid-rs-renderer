@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Nested Interaction with Fragment Test</title>
+    <style>
+      body {
+        margin: 0; /* mostly for demo on mobile */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="diagram" class="diagram">
+      <pre class="zenuml" style="margin: 0">
+        title Nested Interaction with Fragment and Self-Invocation
+        A.Read() {
+          B.Submit() {
+            Process() {
+              if (true) {
+                ProcessCallback() {
+                  A.method
+                }
+              }
+            }
+          }
+        }</pre
+      >
+    </div>
+    <!-- built files will be auto injected -->
+    <script type="module" src="/src/main-cy.ts"></script>
+  </body>
+</html>

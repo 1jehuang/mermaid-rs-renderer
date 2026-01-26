@@ -114,6 +114,163 @@ pub struct GanttTask {
     pub section: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitGraphCommitType {
+    Normal,
+    Reverse,
+    Highlight,
+    Merge,
+    CherryPick,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitGraphCommit {
+    pub id: String,
+    pub message: Option<String>,
+    pub seq: usize,
+    pub commit_type: GitGraphCommitType,
+    pub custom_type: Option<GitGraphCommitType>,
+    pub tags: Vec<String>,
+    pub parents: Vec<String>,
+    pub branch: String,
+    pub custom_id: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitGraphBranch {
+    pub name: String,
+    pub order: Option<f32>,
+    pub insertion_index: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GitGraphData {
+    pub main_branch: String,
+    pub commits: Vec<GitGraphCommit>,
+    pub branches: Vec<GitGraphBranch>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum C4ShapeKind {
+    Person,
+    ExternalPerson,
+    System,
+    SystemDb,
+    SystemQueue,
+    ExternalSystem,
+    ExternalSystemDb,
+    ExternalSystemQueue,
+    Container,
+    ContainerDb,
+    ContainerQueue,
+    ExternalContainer,
+    ExternalContainerDb,
+    ExternalContainerQueue,
+    Component,
+    ComponentDb,
+    ComponentQueue,
+    ExternalComponent,
+    ExternalComponentDb,
+    ExternalComponentQueue,
+}
+
+impl C4ShapeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            C4ShapeKind::Person => "person",
+            C4ShapeKind::ExternalPerson => "external_person",
+            C4ShapeKind::System => "system",
+            C4ShapeKind::SystemDb => "system_db",
+            C4ShapeKind::SystemQueue => "system_queue",
+            C4ShapeKind::ExternalSystem => "external_system",
+            C4ShapeKind::ExternalSystemDb => "external_system_db",
+            C4ShapeKind::ExternalSystemQueue => "external_system_queue",
+            C4ShapeKind::Container => "container",
+            C4ShapeKind::ContainerDb => "container_db",
+            C4ShapeKind::ContainerQueue => "container_queue",
+            C4ShapeKind::ExternalContainer => "external_container",
+            C4ShapeKind::ExternalContainerDb => "external_container_db",
+            C4ShapeKind::ExternalContainerQueue => "external_container_queue",
+            C4ShapeKind::Component => "component",
+            C4ShapeKind::ComponentDb => "component_db",
+            C4ShapeKind::ComponentQueue => "component_queue",
+            C4ShapeKind::ExternalComponent => "external_component",
+            C4ShapeKind::ExternalComponentDb => "external_component_db",
+            C4ShapeKind::ExternalComponentQueue => "external_component_queue",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct C4Shape {
+    pub id: String,
+    pub label: String,
+    pub type_label: Option<String>,
+    pub techn: Option<String>,
+    pub descr: Option<String>,
+    pub sprite: Option<String>,
+    pub tags: Option<String>,
+    pub link: Option<String>,
+    pub parent_boundary: String,
+    pub kind: C4ShapeKind,
+    pub bg_color: Option<String>,
+    pub border_color: Option<String>,
+    pub font_color: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct C4Boundary {
+    pub id: String,
+    pub label: String,
+    pub boundary_type: String,
+    pub descr: Option<String>,
+    pub sprite: Option<String>,
+    pub tags: Option<String>,
+    pub link: Option<String>,
+    pub parent_boundary: String,
+    pub bg_color: Option<String>,
+    pub border_color: Option<String>,
+    pub font_color: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum C4RelKind {
+    Rel,
+    BiRel,
+    RelUp,
+    RelDown,
+    RelLeft,
+    RelRight,
+    RelBack,
+}
+
+#[derive(Debug, Clone)]
+pub struct C4Rel {
+    pub kind: C4RelKind,
+    pub from: String,
+    pub to: String,
+    pub label: String,
+    pub techn: Option<String>,
+    pub descr: Option<String>,
+    pub sprite: Option<String>,
+    pub tags: Option<String>,
+    pub link: Option<String>,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub line_color: Option<String>,
+    pub text_color: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct C4Data {
+    pub shapes: Vec<C4Shape>,
+    pub boundaries: Vec<C4Boundary>,
+    pub rels: Vec<C4Rel>,
+    pub c4_type: Option<String>,
+    pub c4_shape_in_row_override: Option<usize>,
+    pub c4_boundary_in_row_override: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SequenceBox {
     pub label: Option<String>,
@@ -200,6 +357,11 @@ pub enum EdgeDecoration {
     Cross,
     Diamond,
     DiamondFilled,
+    // Crow's foot notation for ER diagrams
+    CrowsFootOne,      // || exactly one
+    CrowsFootZeroOne,  // o| zero or one
+    CrowsFootMany,     // |{ one or many
+    CrowsFootZeroMany, // o{ zero or many
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +400,7 @@ pub struct Graph {
     pub gantt_tasks: Vec<GanttTask>,
     pub gantt_title: Option<String>,
     pub gantt_sections: Vec<String>,
+    pub gitgraph: GitGraphData,
     pub class_defs: HashMap<String, NodeStyle>,
     pub node_classes: HashMap<String, Vec<String>>,
     pub node_styles: HashMap<String, NodeStyle>,
@@ -246,6 +409,8 @@ pub struct Graph {
     pub node_links: HashMap<String, NodeLink>,
     pub edge_styles: HashMap<usize, EdgeStyleOverride>,
     pub edge_style_default: Option<EdgeStyleOverride>,
+    pub c4: C4Data,
+    pub mindmap: MindmapData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,7 +431,37 @@ pub enum NodeShape {
     Trapezoid,
     TrapezoidAlt,
     Asymmetric,
+    MindmapDefault,
     Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MindmapNodeType {
+    Default,
+    RoundedRect,
+    Rect,
+    Circle,
+    Cloud,
+    Bang,
+    Hexagon,
+}
+
+#[derive(Debug, Clone)]
+pub struct MindmapNode {
+    pub id: String,
+    pub label: String,
+    pub level: usize,
+    pub section: Option<usize>,
+    pub node_type: MindmapNodeType,
+    pub icon: Option<String>,
+    pub class: Option<String>,
+    pub children: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MindmapData {
+    pub nodes: Vec<MindmapNode>,
+    pub root_id: Option<String>,
 }
 
 impl Graph {
@@ -292,6 +487,7 @@ impl Graph {
             gantt_tasks: Vec::new(),
             gantt_title: None,
             gantt_sections: Vec::new(),
+            gitgraph: GitGraphData::default(),
             class_defs: HashMap::new(),
             node_classes: HashMap::new(),
             node_styles: HashMap::new(),
@@ -300,6 +496,8 @@ impl Graph {
             node_links: HashMap::new(),
             edge_styles: HashMap::new(),
             edge_style_default: None,
+            c4: C4Data::default(),
+            mindmap: MindmapData::default(),
         }
     }
 
@@ -330,6 +528,7 @@ pub struct NodeStyle {
     pub text_color: Option<String>,
     pub stroke_width: Option<f32>,
     pub stroke_dasharray: Option<String>,
+    pub line_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

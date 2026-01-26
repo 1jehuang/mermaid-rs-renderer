@@ -10,5 +10,9 @@
   "flowchart": {
     "nodeSpacing": 40,
     "rankSpacing": 80
+  },
+  "gitGraph": {
+    "textWidthScale": 1.23,
+    "showCommitLabel": false
   }
 }

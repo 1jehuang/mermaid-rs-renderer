@@ -1,0 +1,113 @@
+{
+  "name": "jotai",
+  "description": "👻 Primitive and flexible state management for React",
+  "private": false,
+  "type": "commonjs",
+  "version": "2.16.2",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "typesVersions": {
+    ">=4.8": {
+      "esm/*": [
+        "esm/*"
+      ],
+      "*": [
+        "*"
+      ]
+    },
+    ">=3.8": {
+      "esm/*": [
+        "ts3.8/*"
+      ],
+      "*": [
+        "ts3.8/*"
+      ]
+    },
+    "*": {
+      "esm/*": [
+        "ts_version_3.8_and_above_is_required.d.ts"
+      ],
+      "*": [
+        "ts_version_3.8_and_above_is_required.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "react-native": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "import": {
+        "types": "./esm/index.d.mts",
+        "default": "./esm/index.mjs"
+      },
+      "default": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      }
+    },
+    "./*": {
+      "react-native": {
+        "types": "./*.d.ts",
+        "default": "./*.js"
+      },
+      "import": {
+        "types": "./esm/*.d.mts",
+        "default": "./esm/*.mjs"
+      },
+      "default": {
+        "types": "./*.d.ts",
+        "default": "./*.js"
+      }
+    }
+  },
+  "files": [
+    "**"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=12.20.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pmndrs/jotai.git"
+  },
+  "keywords": [
+    "react",
+    "state",
+    "manager",
+    "management",
+    "recoil",
+    "store"
+  ],
+  "author": "Daishi Kato",
+  "contributors": [],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pmndrs/jotai/issues"
+  },
+  "homepage": "https://github.com/pmndrs/jotai",
+  "packageManager": "pnpm@10.18.3",
+  "peerDependencies": {
+    "@babel/core": ">=7.0.0",
+    "@babel/template": ">=7.0.0",
+    "@types/react": ">=17.0.0",
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@babel/core": {
+      "optional": true
+    },
+    "@babel/template": {
+      "optional": true
+    },
+    "@types/react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}

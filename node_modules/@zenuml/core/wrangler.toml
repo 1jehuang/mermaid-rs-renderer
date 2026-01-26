@@ -1,0 +1,12 @@
+name = "zenuml-web-renderer"
+compatibility_date = "2024-01-01"
+
+# Use Workers Static Assets (recommended over Pages)
+[assets]
+directory = "dist"
+
+[env.production]
+name = "zenuml-web-renderer"
+
+[env.staging]
+name = "zenuml-web-renderer-staging"
