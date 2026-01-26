@@ -411,6 +411,8 @@ pub struct Graph {
     pub edge_style_default: Option<EdgeStyleOverride>,
     pub c4: C4Data,
     pub mindmap: MindmapData,
+    pub xychart: XYChartData,
+    pub timeline: TimelineData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -464,6 +466,44 @@ pub struct MindmapData {
     pub root_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XYSeriesKind {
+    Bar,
+    Line,
+}
+
+#[derive(Debug, Clone)]
+pub struct XYSeries {
+    pub kind: XYSeriesKind,
+    pub label: Option<String>,
+    pub values: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct XYChartData {
+    pub title: Option<String>,
+    pub x_axis_label: Option<String>,
+    pub x_axis_categories: Vec<String>,
+    pub y_axis_label: Option<String>,
+    pub y_axis_min: Option<f32>,
+    pub y_axis_max: Option<f32>,
+    pub series: Vec<XYSeries>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelineEvent {
+    pub time: String,
+    pub events: Vec<String>,
+    pub section: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TimelineData {
+    pub title: Option<String>,
+    pub events: Vec<TimelineEvent>,
+    pub sections: Vec<String>,
+}
+
 impl Graph {
     pub fn new() -> Self {
         Self {
@@ -498,6 +538,8 @@ impl Graph {
             edge_style_default: None,
             c4: C4Data::default(),
             mindmap: MindmapData::default(),
+            xychart: XYChartData::default(),
+            timeline: TimelineData::default(),
         }
     }
 

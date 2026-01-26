@@ -1879,11 +1879,23 @@ fn parse_journey_task_line(line: &str) -> Option<(String, Option<String>, Vec<St
 fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::Timeline;
-    graph.direction = Direction::TopDown;
+    graph.direction = Direction::LeftRight;
     let (lines, init_config) = preprocess_input(input)?;
 
-    let mut current_section: Option<usize> = None;
-    let mut last_event: Option<String> = None;
+    let mut current_section: Option<String> = None;
+    let mut pending_time: Option<String> = None;
+    let mut pending_events: Vec<String> = Vec::new();
+
+    let flush_pending = |graph: &mut Graph, pending_time: &mut Option<String>, pending_events: &mut Vec<String>, current_section: &Option<String>| {
+        if let Some(time) = pending_time.take() {
+            graph.timeline.events.push(crate::ir::TimelineEvent {
+                time,
+                events: std::mem::take(pending_events),
+                section: current_section.clone(),
+            });
+        }
+        pending_events.clear();
+    };
 
     for raw_line in lines {
         let line = raw_line.trim();
@@ -1895,78 +1907,47 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
         if lower.starts_with("title") {
+            let rest = line.get(5..).unwrap_or("").trim();
+            if !rest.is_empty() {
+                graph.timeline.title = Some(strip_quotes(rest));
+            }
             continue;
         }
         if lower.starts_with("section") {
+            // Flush any pending event before starting new section
+            flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
+            
             let label = line.get(7..).unwrap_or("").trim();
-            let id = format!("section_{}", graph.subgraphs.len());
-            graph.subgraphs.push(Subgraph {
-                id: Some(id),
-                label: label.to_string(),
-                nodes: Vec::new(),
-                direction: None,
-            });
-            current_section = Some(graph.subgraphs.len() - 1);
-            last_event = None;
+            graph.timeline.sections.push(label.to_string());
+            current_section = Some(label.to_string());
             continue;
         }
 
-        if let Some((time, event)) = parse_timeline_event_line(line) {
-            let node_id = format!("timeline_{}", graph.nodes.len());
-            let label = if event.is_empty() {
-                time.clone()
-            } else {
-                format!("{}\n{}", time, event)
-            };
-            graph.ensure_node(
-                &node_id,
-                Some(label),
-                Some(crate::ir::NodeShape::Rectangle),
-            );
-            if let Some(idx) = current_section {
-                if let Some(subgraph) = graph.subgraphs.get_mut(idx) {
-                    subgraph.nodes.push(node_id.clone());
+        // Parse timeline event line: "time : event" or "time : event1 : event2"
+        if let Some(colon_idx) = line.find(':') {
+            let time_part = line[..colon_idx].trim();
+            let events_part = line[colon_idx + 1..].trim();
+            
+            if !time_part.is_empty() {
+                // New time entry - flush any previous
+                flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
+                pending_time = Some(time_part.to_string());
+                
+                // Parse events (can be multiple separated by :)
+                for event in events_part.split(':') {
+                    let event = event.trim();
+                    if !event.is_empty() {
+                        pending_events.push(event.to_string());
+                    }
                 }
             }
-            if let Some(prev) = last_event.take() {
-                graph.edges.push(crate::ir::Edge {
-                    from: prev,
-                    to: node_id.clone(),
-                    label: None,
-                    start_label: None,
-                    end_label: None,
-                    directed: false,
-                    arrow_start: false,
-                    arrow_end: false,
-                    arrow_start_kind: None,
-                    arrow_end_kind: None,
-                    start_decoration: None,
-                    end_decoration: None,
-                    style: crate::ir::EdgeStyle::Solid,
-                });
-            }
-            last_event = Some(node_id);
         }
     }
+    
+    // Flush any remaining pending event
+    flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
 
     Ok(ParseOutput { graph, init_config })
-}
-
-fn parse_timeline_event_line(line: &str) -> Option<(String, String)> {
-    if let Some((left, right)) = line.split_once(':') {
-        let time = left.trim().to_string();
-        if time.is_empty() {
-            return None;
-        }
-        let event = right.trim().to_string();
-        return Some((time, event));
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some((trimmed.to_string(), String::new()))
-    }
 }
 
 fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
@@ -3887,8 +3868,6 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
     graph.kind = DiagramKind::XYChart;
     graph.direction = Direction::LeftRight;
     let (lines, init_config) = preprocess_input(input)?;
-    let mut x_labels: Vec<String> = Vec::new();
-    let mut y_label: Option<String> = None;
 
     for raw_line in lines {
         let line = raw_line.trim();
@@ -3896,46 +3875,107 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
         let lower = line.to_ascii_lowercase();
-        if lower.starts_with("xychart") || lower.starts_with("title") {
+        if lower.starts_with("xychart") {
+            continue;
+        }
+        if lower.starts_with("title") {
+            let rest = line.get(5..).unwrap_or("").trim();
+            if !rest.is_empty() {
+                graph.xychart.title = Some(strip_quotes(rest));
+            }
             continue;
         }
         if lower.starts_with("x-axis") {
             let rest = line.get(6..).unwrap_or("").trim();
-            x_labels = parse_xy_axis_categories(rest);
+            // Check if it's a label followed by categories or just categories
+            if let Some(bracket_idx) = rest.find('[') {
+                let label_part = rest[..bracket_idx].trim();
+                if !label_part.is_empty() {
+                    graph.xychart.x_axis_label = Some(strip_quotes(label_part));
+                }
+                graph.xychart.x_axis_categories = parse_xy_axis_categories(&rest[bracket_idx..]);
+            } else {
+                // Just categories without brackets or a label
+                graph.xychart.x_axis_categories = parse_xy_axis_categories(rest);
+            }
             continue;
         }
         if lower.starts_with("y-axis") {
             let rest = line.get(6..).unwrap_or("").trim();
             if !rest.is_empty() {
-                y_label = Some(strip_quotes(rest));
+                // Parse y-axis which can have label and/or range
+                // Format: y-axis "Label" min --> max  OR  y-axis min --> max  OR  y-axis "Label"
+                let rest_lower = rest.to_ascii_lowercase();
+                if let Some(arrow_idx) = rest_lower.find("-->") {
+                    // Has range
+                    let before_arrow = rest[..arrow_idx].trim();
+                    let after_arrow = rest[arrow_idx + 3..].trim();
+                    
+                    // Parse min value (might have label before it)
+                    let min_str = before_arrow.split_whitespace().last().unwrap_or("0");
+                    if let Ok(min) = min_str.parse::<f32>() {
+                        graph.xychart.y_axis_min = Some(min);
+                    }
+                    if let Ok(max) = after_arrow.parse::<f32>() {
+                        graph.xychart.y_axis_max = Some(max);
+                    }
+                    // Check for label before the min value
+                    let label_part = before_arrow.trim_end_matches(min_str).trim();
+                    if !label_part.is_empty() {
+                        graph.xychart.y_axis_label = Some(strip_quotes(label_part));
+                    }
+                } else {
+                    graph.xychart.y_axis_label = Some(strip_quotes(rest));
+                }
             }
             continue;
         }
-        if let Some((series, values)) = parse_xy_series_line(line) {
-            let node_id = format!("xy_{}", graph.nodes.len());
-            let mut label_lines = Vec::new();
-            label_lines.push(series);
-            if let Some(y_label) = y_label.as_ref() {
-                label_lines.push(y_label.clone());
-            }
-            if !values.is_empty() {
-                if !x_labels.is_empty() && x_labels.len() == values.len() {
-                    for (idx, value) in values.iter().enumerate() {
-                        label_lines.push(format!("{}: {}", x_labels[idx], value));
-                    }
-                } else {
-                    label_lines.push(values.join(", "));
-                }
-            }
-            graph.ensure_node(
-                &node_id,
-                Some(label_lines.join("\n")),
-                Some(crate::ir::NodeShape::Rectangle),
-            );
+        if let Some((series_kind, label, values)) = parse_xy_series_line_v2(line) {
+            graph.xychart.series.push(crate::ir::XYSeries {
+                kind: series_kind,
+                label,
+                values,
+            });
         }
     }
 
     Ok(ParseOutput { graph, init_config })
+}
+
+fn parse_xy_series_line_v2(line: &str) -> Option<(crate::ir::XYSeriesKind, Option<String>, Vec<f32>)> {
+    let lower = line.to_ascii_lowercase();
+    let (kind, rest) = if lower.starts_with("bar") {
+        (crate::ir::XYSeriesKind::Bar, line.get(3..).unwrap_or("").trim())
+    } else if lower.starts_with("line") {
+        (crate::ir::XYSeriesKind::Line, line.get(4..).unwrap_or("").trim())
+    } else {
+        return None;
+    };
+    
+    // Parse optional label and values: [1, 2, 3] or "Label" [1, 2, 3]
+    let (label, values_str) = if let Some(bracket_idx) = rest.find('[') {
+        let label_part = rest[..bracket_idx].trim();
+        let label = if label_part.is_empty() {
+            None
+        } else {
+            Some(strip_quotes(label_part))
+        };
+        (label, &rest[bracket_idx..])
+    } else {
+        (None, rest)
+    };
+    
+    let values: Vec<f32> = values_str
+        .trim_matches(|ch| ch == '[' || ch == ']')
+        .split(',')
+        .filter_map(|s| s.trim().parse::<f32>().ok())
+        .collect();
+    
+    if values.is_empty() {
+        None
+    } else {
+        Some((kind, label, values))
+    }
 }
 
 fn parse_xy_axis_categories(rest: &str) -> Vec<String> {
@@ -5785,8 +5825,10 @@ mod tests {
         let input = "timeline\n  title History\n  2020 : Launch\n  2021 : Growth";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::Timeline);
-        assert_eq!(parsed.graph.nodes.len(), 2);
-        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(parsed.graph.timeline.events.len(), 2);
+        assert_eq!(parsed.graph.timeline.title.as_deref(), Some("History"));
+        assert_eq!(parsed.graph.timeline.events[0].time, "2020");
+        assert_eq!(parsed.graph.timeline.events[0].events, vec!["Launch"]);
     }
 
     #[test]
@@ -5910,7 +5952,10 @@ mod tests {
         let input = "xychart-beta\n  x-axis Q1, Q2\n  y-axis Units\n  bar [10, 20]";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::XYChart);
-        assert_eq!(parsed.graph.nodes.len(), 1);
+        let xychart = &parsed.graph.xychart;
+        assert_eq!(xychart.x_axis_categories, vec!["Q1", "Q2"]);
+        assert_eq!(xychart.y_axis_label.as_deref(), Some("Units"));
+        assert_eq!(xychart.series.len(), 1);
     }
 
     #[test]

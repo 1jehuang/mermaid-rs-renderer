@@ -254,6 +254,18 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
         return svg;
     }
 
+    if let Some(ref xychart) = layout.xychart {
+        svg.push_str(&render_xychart(xychart, theme, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
+    if let Some(ref timeline) = layout.timeline {
+        svg.push_str(&render_timeline(timeline, theme, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
     if let Some(ref gitgraph) = layout.gitgraph {
         svg.push_str(&render_gitgraph(gitgraph, theme, config));
         svg.push_str("</svg>");
@@ -2155,6 +2167,195 @@ fn render_gantt(
         ));
     }
 
+    svg
+}
+
+fn render_xychart(
+    layout: &crate::layout::XYChartLayout,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> String {
+    let mut svg = String::new();
+    
+    // Background
+    svg.push_str(&format!(
+        "<rect x=\"0\" y=\"0\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        layout.width, layout.height, theme.background
+    ));
+    
+    // Title
+    if let Some(ref title) = layout.title {
+        svg.push_str(&text_block_svg(
+            layout.width / 2.0,
+            layout.title_y,
+            title,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+    
+    // Plot area border
+    svg.push_str(&format!(
+        "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\"/>",
+        layout.plot_x, layout.plot_y, layout.plot_width, layout.plot_height, theme.line_color
+    ));
+    
+    // Y-axis ticks and labels
+    for (label, y) in &layout.y_axis_ticks {
+        // Tick line
+        svg.push_str(&format!(
+            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"{}\" stroke-width=\"1\" stroke-dasharray=\"2,2\"/>",
+            layout.plot_x, y, layout.plot_x + layout.plot_width, y, "#ccc"
+        ));
+        // Label
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"end\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
+            layout.plot_x - 5.0, y + theme.font_size / 3.0, 
+            escape_xml(&theme.font_family), theme.font_size * 0.8, 
+            theme.primary_text_color, escape_xml(label)
+        ));
+    }
+    
+    // X-axis categories
+    for (label, x) in &layout.x_axis_categories {
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
+            x, layout.plot_y + layout.plot_height + 20.0,
+            escape_xml(&theme.font_family), theme.font_size * 0.9,
+            theme.primary_text_color, escape_xml(label)
+        ));
+    }
+    
+    // Y-axis label
+    if let Some(ref y_label) = layout.y_axis_label {
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\" transform=\"rotate(-90, {:.2}, {:.2})\">{}</text>",
+            layout.y_axis_label_x, layout.plot_y + layout.plot_height / 2.0,
+            escape_xml(&theme.font_family), theme.font_size,
+            theme.primary_text_color,
+            layout.y_axis_label_x, layout.plot_y + layout.plot_height / 2.0,
+            escape_xml(&y_label.lines.join(" "))
+        ));
+    }
+    
+    // Bars
+    for bar in &layout.bars {
+        svg.push_str(&format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\" stroke=\"none\"/>",
+            bar.x, bar.y, bar.width, bar.height, escape_xml(&bar.color)
+        ));
+    }
+    
+    // Lines
+    for line in &layout.lines {
+        if line.points.len() >= 2 {
+            let path: String = line.points.iter().enumerate().map(|(i, (x, y))| {
+                if i == 0 {
+                    format!("M {:.2},{:.2}", x, y)
+                } else {
+                    format!(" L {:.2},{:.2}", x, y)
+                }
+            }).collect();
+            svg.push_str(&format!(
+                "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+                path, escape_xml(&line.color)
+            ));
+            // Draw points
+            for (x, y) in &line.points {
+                svg.push_str(&format!(
+                    "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"4\" fill=\"{}\" stroke=\"white\" stroke-width=\"1\"/>",
+                    x, y, escape_xml(&line.color)
+                ));
+            }
+        }
+    }
+    
+    svg
+}
+
+fn render_timeline(
+    layout: &crate::layout::TimelineLayout,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> String {
+    let mut svg = String::new();
+    
+    // Background
+    svg.push_str(&format!(
+        "<rect x=\"0\" y=\"0\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
+        layout.width, layout.height, theme.background
+    ));
+    
+    // Title
+    if let Some(ref title) = layout.title {
+        svg.push_str(&text_block_svg(
+            layout.width / 2.0,
+            layout.title_y,
+            title,
+            theme,
+            config,
+            false,
+            Some(theme.primary_text_color.as_str()),
+        ));
+    }
+    
+    // Main timeline line
+    svg.push_str(&format!(
+        "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"{}\" stroke-width=\"3\"/>",
+        layout.line_start_x, layout.line_y, layout.line_end_x, layout.line_y, theme.primary_border_color
+    ));
+    
+    // Colors for events
+    let colors = [
+        "#ECECFF", "#FFE6CC", "#D5E8D4", "#F8CECC", "#FFF2CC", "#E1D5E7"
+    ];
+    
+    // Events
+    for (i, event) in layout.events.iter().enumerate() {
+        let color = colors[i % colors.len()];
+        let center_x = event.x + event.width / 2.0;
+        
+        // Circle on timeline
+        svg.push_str(&format!(
+            "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"8\" fill=\"{}\" stroke=\"{}\" stroke-width=\"2\"/>",
+            center_x, event.circle_y, theme.primary_color, theme.primary_border_color
+        ));
+        
+        // Vertical connector line
+        svg.push_str(&format!(
+            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"{}\" stroke-width=\"2\" stroke-dasharray=\"4,2\"/>",
+            center_x, event.circle_y + 8.0, center_x, event.y, theme.primary_border_color
+        ));
+        
+        // Event box
+        svg.push_str(&format!(
+            "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"5\" ry=\"5\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
+            event.x, event.y, event.width, event.height, color, theme.primary_border_color
+        ));
+        
+        // Time label (bold, at top of box)
+        svg.push_str(&format!(
+            "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" font-weight=\"bold\" fill=\"{}\">{}</text>",
+            center_x, event.y + 20.0,
+            escape_xml(&theme.font_family), theme.font_size,
+            theme.primary_text_color, escape_xml(&event.time.lines.join(" "))
+        ));
+        
+        // Event descriptions
+        let mut y_offset = 40.0;
+        for evt in &event.events {
+            svg.push_str(&format!(
+                "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
+                center_x, event.y + y_offset,
+                escape_xml(&theme.font_family), theme.font_size * 0.9,
+                theme.primary_text_color, escape_xml(&evt.lines.join(" "))
+            ));
+            y_offset += theme.font_size * 1.2;
+        }
+    }
+    
     svg
 }
 

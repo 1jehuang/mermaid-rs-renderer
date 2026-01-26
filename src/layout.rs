@@ -329,6 +329,75 @@ pub struct ErrorLayout {
 }
 
 #[derive(Debug, Clone)]
+pub struct XYChartBarLayout {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub value: f32,
+    pub color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct XYChartLineLayout {
+    pub points: Vec<(f32, f32)>,
+    pub color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct XYChartLayout {
+    pub title: Option<TextBlock>,
+    pub title_y: f32,
+    pub x_axis_label: Option<TextBlock>,
+    pub x_axis_label_y: f32,
+    pub y_axis_label: Option<TextBlock>,
+    pub y_axis_label_x: f32,
+    pub x_axis_categories: Vec<(String, f32)>,
+    pub y_axis_ticks: Vec<(String, f32)>,
+    pub bars: Vec<XYChartBarLayout>,
+    pub lines: Vec<XYChartLineLayout>,
+    pub plot_x: f32,
+    pub plot_y: f32,
+    pub plot_width: f32,
+    pub plot_height: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelineEventLayout {
+    pub time: TextBlock,
+    pub events: Vec<TextBlock>,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub circle_y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelineSectionLayout {
+    pub label: TextBlock,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimelineLayout {
+    pub title: Option<TextBlock>,
+    pub title_y: f32,
+    pub events: Vec<TimelineEventLayout>,
+    pub sections: Vec<TimelineSectionLayout>,
+    pub line_y: f32,
+    pub line_start_x: f32,
+    pub line_end_x: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub kind: crate::ir::DiagramKind,
     pub nodes: BTreeMap<String, NodeLayout>,
@@ -352,6 +421,8 @@ pub struct Layout {
     pub sankey: Option<SankeyLayout>,
     pub gitgraph: Option<GitGraphLayout>,
     pub c4: Option<C4Layout>,
+    pub xychart: Option<XYChartLayout>,
+    pub timeline: Option<TimelineLayout>,
     pub error: Option<ErrorLayout>,
     pub width: f32,
     pub height: f32,
@@ -674,6 +745,8 @@ fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout {
             viewbox_height,
             use_max_width: conf.use_max_width,
         }),
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -1250,15 +1323,15 @@ pub fn compute_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         crate::ir::DiagramKind::GitGraph => compute_gitgraph_layout(graph, theme, config),
         crate::ir::DiagramKind::C4 => compute_c4_layout(graph, config),
         crate::ir::DiagramKind::Mindmap => compute_mindmap_layout(graph, theme, config),
+        crate::ir::DiagramKind::XYChart => compute_xychart_layout(graph, theme, config),
+        crate::ir::DiagramKind::Timeline => compute_timeline_layout(graph, theme, config),
         crate::ir::DiagramKind::Class
         | crate::ir::DiagramKind::State
         | crate::ir::DiagramKind::Er
         | crate::ir::DiagramKind::Journey
-        | crate::ir::DiagramKind::Timeline
         | crate::ir::DiagramKind::Requirement
         | crate::ir::DiagramKind::Block
         | crate::ir::DiagramKind::Packet
-        | crate::ir::DiagramKind::XYChart
         | crate::ir::DiagramKind::Flowchart => compute_flowchart_layout(graph, theme, config),
     }
 }
@@ -1296,6 +1369,8 @@ fn compute_error_layout(graph: &Graph, config: &LayoutConfig) -> Layout {
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: Some(ErrorLayout {
             viewbox_width,
             viewbox_height,
@@ -1351,6 +1426,8 @@ fn compute_pie_error_layout(graph: &Graph, config: &LayoutConfig) -> Layout {
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: Some(ErrorLayout {
             viewbox_width,
             viewbox_height,
@@ -1820,6 +1897,8 @@ fn compute_mindmap_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -2310,6 +2389,8 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
             direction: graph.direction,
         }),
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -3089,6 +3170,8 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width: width.max(200.0),
         height: height.max(1.0),
@@ -3174,6 +3257,8 @@ fn compute_quadrant_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -3272,6 +3357,8 @@ fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> 
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -3645,6 +3732,8 @@ fn compute_sankey_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) ->
         }),
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width: SANKEY_WIDTH,
         height: SANKEY_HEIGHT,
@@ -3840,6 +3929,8 @@ fn compute_architecture_layout(graph: &Graph, theme: &Theme, config: &LayoutConf
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -3925,6 +4016,8 @@ fn compute_radar_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> 
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width: WIDTH,
         height: HEIGHT,
@@ -4066,6 +4159,256 @@ fn compute_kanban_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) ->
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
+        error: None,
+        width,
+        height,
+    }
+}
+
+fn compute_xychart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
+    let data = &graph.xychart;
+    let font_size = theme.font_size;
+    let padding = 40.0;
+    let y_axis_width = 60.0;
+    let x_axis_height = 40.0;
+    let title_height = if data.title.is_some() { 30.0 } else { 0.0 };
+    
+    let plot_width = 400.0;
+    let plot_height = 250.0;
+    
+    let width = padding * 2.0 + y_axis_width + plot_width;
+    let height = padding * 2.0 + title_height + plot_height + x_axis_height;
+    
+    let plot_x = padding + y_axis_width;
+    let plot_y = padding + title_height;
+    
+    // Find min/max values
+    let all_values: Vec<f32> = data.series.iter()
+        .flat_map(|s| s.values.iter().copied())
+        .collect();
+    let min_val = data.y_axis_min.unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::min).min(0.0));
+    let max_val = data.y_axis_max.unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::max));
+    let range = (max_val - min_val).max(1.0);
+    
+    // Number of categories
+    let num_categories = data.x_axis_categories.len().max(
+        data.series.iter().map(|s| s.values.len()).max().unwrap_or(0)
+    ).max(1);
+    
+    let bar_group_width = plot_width / num_categories as f32;
+    let bar_padding = bar_group_width * 0.1;
+    
+    // Count bar series for width calculation
+    let bar_count = data.series.iter().filter(|s| s.kind == crate::ir::XYSeriesKind::Bar).count().max(1);
+    let bar_width = (bar_group_width - bar_padding * 2.0) / bar_count as f32;
+    
+    let colors = vec![
+        "#4e79a7".to_string(),
+        "#f28e2c".to_string(),
+        "#e15759".to_string(),
+        "#76b7b2".to_string(),
+        "#59a14f".to_string(),
+        "#edc949".to_string(),
+        "#af7aa1".to_string(),
+        "#ff9da7".to_string(),
+    ];
+    
+    let mut bars = Vec::new();
+    let mut lines = Vec::new();
+    let mut bar_series_idx = 0;
+    
+    for (series_idx, series) in data.series.iter().enumerate() {
+        let color = colors.get(series_idx % colors.len()).cloned().unwrap_or_else(|| "#333".to_string());
+        
+        match series.kind {
+            crate::ir::XYSeriesKind::Bar => {
+                for (i, &value) in series.values.iter().enumerate() {
+                    let bar_height = ((value - min_val) / range) * plot_height;
+                    let x = plot_x + i as f32 * bar_group_width + bar_padding + bar_series_idx as f32 * bar_width;
+                    let y = plot_y + plot_height - bar_height;
+                    
+                    bars.push(XYChartBarLayout {
+                        x,
+                        y,
+                        width: bar_width,
+                        height: bar_height,
+                        value,
+                        color: color.clone(),
+                    });
+                }
+                bar_series_idx += 1;
+            }
+            crate::ir::XYSeriesKind::Line => {
+                let points: Vec<(f32, f32)> = series.values.iter().enumerate().map(|(i, &value)| {
+                    let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
+                    let y = plot_y + plot_height - ((value - min_val) / range) * plot_height;
+                    (x, y)
+                }).collect();
+                
+                lines.push(XYChartLineLayout {
+                    points,
+                    color,
+                });
+            }
+        }
+    }
+    
+    // X-axis categories
+    let x_axis_categories: Vec<(String, f32)> = data.x_axis_categories.iter().enumerate().map(|(i, cat)| {
+        let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
+        (cat.clone(), x)
+    }).collect();
+    
+    // Y-axis ticks
+    let num_ticks = 5;
+    let y_axis_ticks: Vec<(String, f32)> = (0..=num_ticks).map(|i| {
+        let value = min_val + (i as f32 / num_ticks as f32) * range;
+        let y = plot_y + plot_height - (i as f32 / num_ticks as f32) * plot_height;
+        (format!("{:.0}", value), y)
+    }).collect();
+    
+    let title = data.title.as_ref().map(|t| measure_label(t, theme, config));
+    let x_axis_label = data.x_axis_label.as_ref().map(|l| measure_label(l, theme, config));
+    let y_axis_label = data.y_axis_label.as_ref().map(|l| measure_label(l, theme, config));
+    
+    Layout {
+        kind: graph.kind,
+        nodes: BTreeMap::new(),
+        edges: Vec::new(),
+        subgraphs: Vec::new(),
+        lifelines: Vec::new(),
+        sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
+        sequence_frames: Vec::new(),
+        sequence_notes: Vec::new(),
+        sequence_activations: Vec::new(),
+        sequence_numbers: Vec::new(),
+        state_notes: Vec::new(),
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
+        quadrant: None,
+        gantt: None,
+        sankey: None,
+        gitgraph: None,
+        c4: None,
+        xychart: Some(XYChartLayout {
+            title,
+            title_y: padding + font_size,
+            x_axis_label,
+            x_axis_label_y: plot_y + plot_height + x_axis_height - 10.0,
+            y_axis_label,
+            y_axis_label_x: padding,
+            x_axis_categories,
+            y_axis_ticks,
+            bars,
+            lines,
+            plot_x,
+            plot_y,
+            plot_width,
+            plot_height,
+            width,
+            height,
+        }),
+        timeline: None,
+        error: None,
+        width,
+        height,
+    }
+}
+
+fn compute_timeline_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
+    let data = &graph.timeline;
+    let font_size = theme.font_size;
+    let padding = 30.0;
+    let event_width = 120.0;
+    let event_height = 80.0;
+    let event_spacing = 40.0;
+    let title_height = if data.title.is_some() { 40.0 } else { 0.0 };
+    let line_y = padding + title_height + 60.0;
+    
+    let num_events = data.events.len().max(1);
+    let total_events_width = num_events as f32 * event_width + (num_events - 1).max(0) as f32 * event_spacing;
+    
+    let width = padding * 2.0 + total_events_width;
+    let height = padding * 2.0 + title_height + event_height + 100.0;
+    
+    let title = data.title.as_ref().map(|t| measure_label(t, theme, config));
+    
+    let events: Vec<TimelineEventLayout> = data.events.iter().enumerate().map(|(i, event)| {
+        let x = padding + i as f32 * (event_width + event_spacing);
+        let y = line_y + 30.0;
+        
+        let time_block = measure_label(&event.time, theme, config);
+        let event_blocks: Vec<TextBlock> = event.events.iter()
+            .map(|e| measure_label(e, theme, config))
+            .collect();
+        
+        TimelineEventLayout {
+            time: time_block,
+            events: event_blocks,
+            x,
+            y,
+            width: event_width,
+            height: event_height,
+            circle_y: line_y,
+        }
+    }).collect();
+    
+    let line_start_x = padding;
+    let line_end_x = width - padding;
+    
+    // Sections (simplified - just record them)
+    let sections: Vec<TimelineSectionLayout> = data.sections.iter().enumerate().map(|(i, section)| {
+        let label = measure_label(section, theme, config);
+        TimelineSectionLayout {
+            label,
+            x: padding + i as f32 * 200.0,
+            y: padding,
+            width: 180.0,
+            height: 30.0,
+        }
+    }).collect();
+    
+    Layout {
+        kind: graph.kind,
+        nodes: BTreeMap::new(),
+        edges: Vec::new(),
+        subgraphs: Vec::new(),
+        lifelines: Vec::new(),
+        sequence_footboxes: Vec::new(),
+        sequence_boxes: Vec::new(),
+        sequence_frames: Vec::new(),
+        sequence_notes: Vec::new(),
+        sequence_activations: Vec::new(),
+        sequence_numbers: Vec::new(),
+        state_notes: Vec::new(),
+        pie_slices: Vec::new(),
+        pie_legend: Vec::new(),
+        pie_center: (0.0, 0.0),
+        pie_radius: 0.0,
+        pie_title: None,
+        quadrant: None,
+        gantt: None,
+        sankey: None,
+        gitgraph: None,
+        c4: None,
+        xychart: None,
+        timeline: Some(TimelineLayout {
+            title,
+            title_y: padding + font_size,
+            events,
+            sections,
+            line_y,
+            line_start_x,
+            line_end_x,
+            width,
+            height,
+        }),
         error: None,
         width,
         height,
@@ -4476,6 +4819,8 @@ fn compute_flowchart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig)
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
@@ -5551,6 +5896,8 @@ fn compute_sequence_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         sankey: None,
         gitgraph: None,
         c4: None,
+        xychart: None,
+        timeline: None,
         error: None,
         width,
         height,
