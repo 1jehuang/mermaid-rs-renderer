@@ -92,24 +92,26 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
     let mut width_attr = width.to_string();
     let mut height_attr = height.to_string();
     let mut style_attr = String::new();
-    if let Some(c4) = layout.c4.as_ref() {
-        if c4.use_max_width {
+    if layout.error.is_none() {
+        if let Some(c4) = layout.c4.as_ref() {
+            if c4.use_max_width {
+                width_attr = "100%".to_string();
+                height_attr.clear();
+                style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
+            }
+        } else if layout.gitgraph.is_some() && config.gitgraph.use_max_width {
+            width_attr = "100%".to_string();
+            height_attr.clear();
+            style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
+        } else if layout.kind == crate::ir::DiagramKind::Mindmap && config.mindmap.use_max_width {
+            width_attr = "100%".to_string();
+            height_attr.clear();
+            style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
+        } else if layout.kind == crate::ir::DiagramKind::Pie && config.pie.use_max_width {
             width_attr = "100%".to_string();
             height_attr.clear();
             style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
         }
-    } else if layout.gitgraph.is_some() && config.gitgraph.use_max_width {
-        width_attr = "100%".to_string();
-        height_attr.clear();
-        style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
-    } else if layout.kind == crate::ir::DiagramKind::Mindmap && config.mindmap.use_max_width {
-        width_attr = "100%".to_string();
-        height_attr.clear();
-        style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
-    } else if layout.kind == crate::ir::DiagramKind::Pie && config.pie.use_max_width {
-        width_attr = "100%".to_string();
-        height_attr.clear();
-        style_attr = format!(" style=\"max-width: {:.3}px;\"", viewbox_width);
     }
     svg.push_str(&format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\"{} width=\"{width_attr}\"{} viewBox=\"{viewbox_x} {viewbox_y} {viewbox_width} {viewbox_height}\"{style_attr}>",
@@ -124,6 +126,10 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
             format!(" height=\"{height_attr}\"")
         }
     ));
+
+    if layout.error.is_some() {
+        svg.push_str(&error_style_block(theme));
+    }
 
     svg.push_str(&format!(
         "<rect x=\"{viewbox_x}\" y=\"{viewbox_y}\" width=\"{viewbox_width}\" height=\"{viewbox_height}\" fill=\"{}\"/>",
@@ -1161,7 +1167,7 @@ fn render_sankey(layout: &SankeyLayout, theme: &Theme, _config: &LayoutConfig) -
     svg
 }
 
-fn render_error(layout: &ErrorLayout, theme: &Theme, _config: &LayoutConfig) -> String {
+fn render_error(layout: &ErrorLayout, _theme: &Theme, _config: &LayoutConfig) -> String {
     // Mermaid CLI renders a dedicated error diagram for unsupported syntax.
     // We mirror that here so treemap diagrams can match CLI output closely.
     const ERROR_ICON_PATHS: [&str; 6] = [
@@ -1174,44 +1180,71 @@ fn render_error(layout: &ErrorLayout, theme: &Theme, _config: &LayoutConfig) -> 
     ];
 
     let mut svg = String::new();
-    let icon_fill = "#552222";
-    let transform = format!(
-        "translate({:.2},{:.2}) scale({:.4})",
-        layout.icon_tx, layout.icon_ty, layout.icon_scale
-    );
+    let needs_transform = layout.icon_scale != 1.0 || layout.icon_tx != 0.0 || layout.icon_ty != 0.0;
 
-    svg.push_str(&format!("<g transform=\"{transform}\">"));
-    for path in ERROR_ICON_PATHS {
-        svg.push_str(&format!(
-            "<path class=\"error-icon\" d=\"{path}\" fill=\"{icon_fill}\"/>"
-        ));
+    let fmt = |value: f32| -> String {
+        if (value - value.round()).abs() < 0.001 {
+            format!("{:.0}", value)
+        } else {
+            format!("{:.2}", value)
+        }
+    };
+
+    svg.push_str("<g>");
+    if needs_transform {
+        let transform = format!(
+            "translate({},{}) scale({})",
+            fmt(layout.icon_tx),
+            fmt(layout.icon_ty),
+            fmt(layout.icon_scale)
+        );
+        svg.push_str(&format!("<g transform=\"{transform}\">"));
     }
-    svg.push_str("</g>");
+    for path in ERROR_ICON_PATHS {
+        svg.push_str(&format!("<path class=\"error-icon\" d=\"{path}\"/>"));
+    }
+    if needs_transform {
+        svg.push_str("</g>");
+    }
 
     let message = escape_xml(&layout.message);
     let version = escape_xml(&format!("mermaid version {}", layout.version));
     svg.push_str(&format!(
-        "<text class=\"error-text\" x=\"{:.2}\" y=\"{:.2}\" font-size=\"{:.2}px\" text-anchor=\"middle\" fill=\"{}\" stroke=\"{}\" font-family=\"{}\">{}</text>",
-        layout.text_x,
-        layout.text_y,
-        layout.text_size,
-        icon_fill,
-        icon_fill,
-        theme.font_family,
+        "<text class=\"error-text\" x=\"{}\" y=\"{}\" font-size=\"{}px\" style=\"text-anchor: middle;\">{}</text>",
+        fmt(layout.text_x),
+        fmt(layout.text_y),
+        fmt(layout.text_size),
         message
     ));
     svg.push_str(&format!(
-        "<text class=\"error-text\" x=\"{:.2}\" y=\"{:.2}\" font-size=\"{:.2}px\" text-anchor=\"middle\" fill=\"{}\" stroke=\"{}\" font-family=\"{}\">{}</text>",
-        layout.version_x,
-        layout.version_y,
-        layout.version_size,
-        icon_fill,
-        icon_fill,
-        theme.font_family,
+        "<text class=\"error-text\" x=\"{}\" y=\"{}\" font-size=\"{}px\" style=\"text-anchor: middle;\">{}</text>",
+        fmt(layout.version_x),
+        fmt(layout.version_y),
+        fmt(layout.version_size),
         version
     ));
+    svg.push_str("</g>");
 
     svg
+}
+
+fn normalize_font_family_css(font_family: &str) -> String {
+    font_family
+        .split(',')
+        .map(|part| part.trim().trim_matches('\'').trim_matches('"'))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn error_style_block(theme: &Theme) -> String {
+    let font_family = normalize_font_family_css(&theme.font_family);
+    format!(
+        "<style>svg{{font-family:{font_family};font-size:{font_size};fill:{fill};}}.error-icon{{fill:#552222;}}.error-text{{fill:#552222;stroke:#552222;}}</style>",
+        font_family = font_family,
+        font_size = theme.font_size,
+        fill = theme.text_color
+    )
 }
 
 fn render_requirement(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> String {
