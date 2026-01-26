@@ -1438,17 +1438,18 @@ fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
 
-        if let Some((left, right, label, left_label, right_label, left_decoration, right_decoration, style)) =
+        if let Some((left, right, label, _left_label, _right_label, left_decoration, right_decoration, style)) =
             parse_er_relation_line(line)
         {
             graph.ensure_node(&left, None, Some(crate::ir::NodeShape::Rectangle));
             graph.ensure_node(&right, None, Some(crate::ir::NodeShape::Rectangle));
+            // Don't use start_label/end_label for ER diagrams - crow's foot symbols convey cardinality
             graph.edges.push(crate::ir::Edge {
                 from: left,
                 to: right,
                 label,
-                start_label: left_label,
-                end_label: right_label,
+                start_label: None,
+                end_label: None,
                 directed: false,
                 arrow_start: false,
                 arrow_end: false,
@@ -5782,8 +5783,11 @@ mod tests {
         assert_eq!(parsed.graph.edges.len(), 1);
         let edge = &parsed.graph.edges[0];
         assert_eq!(edge.label.as_deref(), Some("places"));
-        assert_eq!(edge.start_label.as_deref(), Some("1"));
-        assert_eq!(edge.end_label.as_deref(), Some("0..*"));
+        // ER diagrams use crow's foot decorations, not text labels
+        assert_eq!(edge.start_label, None);
+        assert_eq!(edge.end_label, None);
+        assert_eq!(edge.start_decoration, Some(crate::ir::EdgeDecoration::CrowsFootOne));
+        assert_eq!(edge.end_decoration, Some(crate::ir::EdgeDecoration::CrowsFootZeroMany));
         let customer = parsed.graph.nodes.get("CUSTOMER").unwrap();
         assert!(customer.label.contains("CUSTOMER"));
         assert!(customer.label.contains("string id"));
