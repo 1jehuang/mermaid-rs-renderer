@@ -73,8 +73,8 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
             let viewbox_y = min_y - pad;
             (width, height, viewbox_x, viewbox_y, width, height)
         } else {
-            let width = layout.width.max(200.0);
-            let height = layout.height.max(200.0);
+            let width = layout.width.max(1.0);
+            let height = layout.height.max(1.0);
             (width, height, 0.0, 0.0, width, height)
         };
     let is_sequence = !layout.sequence_footboxes.is_empty();
