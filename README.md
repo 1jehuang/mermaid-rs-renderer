@@ -157,6 +157,11 @@ mmdr supports **12 Mermaid diagram types**:
 | Pie Chart | <img src="docs/comparisons/pie_mmdr.svg" width="350"> | <img src="docs/comparisons/pie_official.svg" width="350"> |
 | Gantt | <img src="docs/comparisons/gantt_mmdr.svg" width="350"> | <img src="docs/comparisons/gantt_official.svg" width="350"> |
 | Mindmap | <img src="docs/comparisons/mindmap_mmdr.svg" width="350"> | <img src="docs/comparisons/mindmap_official.svg" width="350"> |
+| Timeline | <img src="docs/comparisons/timeline_mmdr.svg" width="350"> | <img src="docs/comparisons/timeline_official.svg" width="350"> |
+| Journey | <img src="docs/comparisons/journey_mmdr.svg" width="350"> | <img src="docs/comparisons/journey_official.svg" width="350"> |
+| Git Graph | <img src="docs/comparisons/gitgraph_mmdr.svg" width="350"> | <img src="docs/comparisons/gitgraph_official.svg" width="350"> |
+| XY Chart | <img src="docs/comparisons/xychart_mmdr.svg" width="350"> | <img src="docs/comparisons/xychart_official.svg" width="350"> |
+| Quadrant | <img src="docs/comparisons/quadrant_mmdr.svg" width="350"> | <img src="docs/comparisons/quadrant_official.svg" width="350"> |
 
 </details>
 

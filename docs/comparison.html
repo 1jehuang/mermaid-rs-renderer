@@ -3,42 +3,178 @@
 <head>
 <title>mmdr vs mermaid-cli Comparison</title>
 <style>
-body { font-family: system-ui, sans-serif; max-width: 1400px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+body { font-family: system-ui, sans-serif; max-width: 1600px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
 h1 { text-align: center; }
-.comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px; }
+.comparison { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 40px; }
 .panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 .panel h3 { margin-top: 0; text-align: center; }
+.panel.code h3 { color: #1565c0; }
 .panel.mmdr h3 { color: #2e7d32; }
 .panel.official h3 { color: #f57c00; }
-.panel img, .panel object { width: 100%; height: auto; max-height: 600px; }
-h2 { border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+.panel img { width: 100%; height: auto; }
+.panel pre { background: #f8f8f8; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; margin: 0; white-space: pre-wrap; }
+h2 { border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-top: 40px; }
+.stats { text-align: center; color: #666; font-size: 14px; margin-bottom: 30px; }
 </style>
 </head>
 <body>
 <h1>mmdr vs mermaid-cli Visual Comparison</h1>
+<p class="stats">Comparing output quality between mmdr (Rust) and mermaid-cli (Node.js + Chromium)</p>
 
 <h2>Flowchart</h2>
 <div class="comparison">
-<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/flowchart_mmdr.svg" alt="mmdr flowchart"></div>
-<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/flowchart_official.svg" alt="official flowchart"></div>
-</div>
-
-<h2>Class Diagram</h2>
-<div class="comparison">
-<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/class_mmdr.svg" alt="mmdr class"></div>
-<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/class_official.svg" alt="official class"></div>
-</div>
-
-<h2>State Diagram</h2>
-<div class="comparison">
-<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/state_mmdr.svg" alt="mmdr state"></div>
-<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/state_official.svg" alt="official state"></div>
+<div class="panel code"><h3>Source</h3><pre>flowchart LR
+  A([Start]) --> B{Decision}
+  B -->|yes| C[/Do thing/]
+  B -->|no| D[\\Skip\\]
+  C --> E[[End]]
+  D --> E</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/flowchart_mmdr.svg?v=2" alt="mmdr flowchart"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/flowchart_official.svg?v=2" alt="official flowchart"></div>
 </div>
 
 <h2>Sequence Diagram</h2>
 <div class="comparison">
-<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/sequence_mmdr.svg" alt="mmdr sequence"></div>
-<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/sequence_official.svg" alt="official sequence"></div>
+<div class="panel code"><h3>Source</h3><pre>sequenceDiagram
+  participant Alice
+  participant Bob
+  Alice->>Bob: Hello Bob
+  Bob-->>Alice: Hi Alice</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/sequence_mmdr.svg?v=2" alt="mmdr sequence"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/sequence_official.svg?v=2" alt="official sequence"></div>
+</div>
+
+<h2>Class Diagram</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>classDiagram
+class Animal {
+  +String name
+  +eat()
+}
+class Dog
+Animal <|-- Dog : inherits</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/class_mmdr.svg?v=2" alt="mmdr class"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/class_official.svg?v=2" alt="official class"></div>
+</div>
+
+<h2>State Diagram</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>stateDiagram-v2
+[*] --> Idle
+Idle --> Active : start
+state "Waiting" as Wait
+Wait --> Active</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/state_mmdr.svg?v=2" alt="mmdr state"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/state_official.svg?v=2" alt="official state"></div>
+</div>
+
+<h2>ER Diagram</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>erDiagram
+CUSTOMER ||--o{ ORDER : places
+CUSTOMER {
+  string id
+  string name
+}
+ORDER {
+  string id
+  date created_at
+}</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/er_mmdr.svg?v=2" alt="mmdr ER"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/er_official.svg?v=2" alt="official ER"></div>
+</div>
+
+<h2>Pie Chart</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>pie showData
+  title Pets
+  "Dogs" : 10
+  Cats : 5</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/pie_mmdr.svg?v=2" alt="mmdr pie"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/pie_official.svg?v=2" alt="official pie"></div>
+</div>
+
+<h2>Gantt Chart</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>gantt
+  title Plan
+  dateFormat  YYYY-MM-DD
+  section Alpha
+  Task A : done, a1, 2026-01-01, 5d
+  Task B : after a1, 3d</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/gantt_mmdr.svg?v=2" alt="mmdr gantt"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/gantt_official.svg?v=2" alt="official gantt"></div>
+</div>
+
+<h2>Mindmap</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>mindmap
+  root((Root))
+    Child A
+    Child B
+      Grandchild</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/mindmap_mmdr.svg?v=2" alt="mmdr mindmap"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/mindmap_official.svg?v=2" alt="official mindmap"></div>
+</div>
+
+<h2>Timeline</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>timeline
+  title History
+  2020 : Launch
+  2021 : Growth</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/timeline_mmdr.svg?v=2" alt="mmdr timeline"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/timeline_official.svg?v=2" alt="official timeline"></div>
+</div>
+
+<h2>User Journey</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>journey
+  title My Journey
+  section Start
+    Step one: 5: Alice
+    Step two: 3: Alice, Bob</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/journey_mmdr.svg?v=2" alt="mmdr journey"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/journey_official.svg?v=2" alt="official journey"></div>
+</div>
+
+<h2>Git Graph</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>gitGraph
+  commit
+  branch feature
+  checkout feature
+  commit id:"F1"
+  checkout main
+  merge feature</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/gitgraph_mmdr.svg?v=2" alt="mmdr gitgraph"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/gitgraph_official.svg?v=2" alt="official gitgraph"></div>
+</div>
+
+<h2>XY Chart</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>xychart-beta
+  x-axis [Q1, Q2]
+  y-axis Units
+  bar [10, 20]</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/xychart_mmdr.svg?v=2" alt="mmdr xychart"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/xychart_official.svg?v=2" alt="official xychart"></div>
+</div>
+
+<h2>Quadrant Chart</h2>
+<div class="comparison">
+<div class="panel code"><h3>Source</h3><pre>quadrantChart
+  title Sample
+  x-axis Low Reach --> High Reach
+  y-axis Low Engagement --> High Engagement
+  quadrant-1 Execute
+  quadrant-2 Expand
+  quadrant-3 Monitor
+  quadrant-4 Re-evaluate
+  A : [0.2, 0.8]
+  B : [0.7, 0.3]</pre></div>
+<div class="panel mmdr"><h3>mmdr</h3><img src="comparisons/quadrant_mmdr.svg?v=2" alt="mmdr quadrant"></div>
+<div class="panel official"><h3>mermaid-cli</h3><img src="comparisons/quadrant_official.svg?v=2" alt="official quadrant"></div>
 </div>
 
 </body>
