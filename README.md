@@ -112,7 +112,7 @@ mmdr -i README.md -o ./diagrams/ -e svg
 
 ## Diagram Types
 
-mmdr supports **12 Mermaid diagram types**:
+mmdr supports **13 Mermaid diagram types**:
 
 | Category | Diagrams |
 |:---------|:---------|

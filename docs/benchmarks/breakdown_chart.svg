@@ -8,31 +8,33 @@
   .bar-render { fill: #FF9800; }
 </style>
 <text x="300.0" y="25" text-anchor="middle" class="title">mmdr Pipeline Breakdown</text>
-<rect x="100" y="44.5" width="13.765040764689344" height="21.0" class="bar-parse"/>
-<rect x="113.76504076468935" y="44.5" width="0.6391973573235873" height="21.0" class="bar-layout"/>
-<rect x="114.40423812201293" y="44.5" width="0.6491073938712398" height="21.0" class="bar-render"/>
+<rect x="100" y="44.5" width="13.182818690648386" height="21.0" class="bar-parse"/>
+<rect x="113.18281869064839" y="44.5" width="15.08385768521675" height="21.0" class="bar-layout"/>
+<rect x="128.26667637586513" y="44.5" width="0.6253827134341104" height="21.0" class="bar-render"/>
 <text x="95" y="59.0" text-anchor="end" class="tick-label">flowchart small</text>
-<rect x="100" y="74.5" width="14.959200168681473" height="21.0" class="bar-parse"/>
-<rect x="114.95920016868148" y="74.5" width="73.75214366038797" height="21.0" class="bar-layout"/>
-<text x="151.83527199887547" y="89.0" text-anchor="middle" fill="white" font-size="9">5.58</text>
-<rect x="188.71134382906945" y="74.5" width="2.8854723081248244" height="21.0" class="bar-render"/>
+<rect x="100" y="74.5" width="16.141718991523206" height="21.0" class="bar-parse"/>
+<rect x="116.1417189915232" y="74.5" width="78.65509948066821" height="21.0" class="bar-layout"/>
+<text x="155.4692687318573" y="89.0" text-anchor="middle" fill="white" font-size="9">6.32</text>
+<rect x="194.79681847219143" y="74.5" width="2.38796633114766" height="21.0" class="bar-render"/>
 <text x="95" y="89.0" text-anchor="end" class="tick-label">flowchart medium</text>
-<rect x="100" y="104.5" width="22.56515321900478" height="21.0" class="bar-parse"/>
-<rect x="122.56515321900478" y="104.5" width="436.8063325836379" height="21.0" class="bar-layout"/>
-<text x="340.96831951082373" y="119.0" text-anchor="middle" fill="white" font-size="9">33.06</text>
-<rect x="559.3714858026427" y="104.5" width="10.628514197357323" height="21.0" class="bar-render"/>
+<rect x="100" y="104.5" width="20.107143211780787" height="21.0" class="bar-parse"/>
+<rect x="120.1071432117808" y="104.5" width="440.3876618153773" height="21.0" class="bar-layout"/>
+<text x="340.30097411946946" y="119.0" text-anchor="middle" fill="white" font-size="9">35.39</text>
+<rect x="560.4948050271581" y="104.5" width="9.505194972841826" height="21.0" class="bar-render"/>
 <text x="95" y="119.0" text-anchor="end" class="tick-label">flowchart large</text>
-<rect x="100" y="134.5" width="4.761772561147034" height="21.0" class="bar-parse"/>
-<rect x="104.76177256114704" y="134.5" width="3.0770663480461065" height="21.0" class="bar-layout"/>
-<rect x="107.83883890919314" y="134.5" width="1.9687939274669664" height="21.0" class="bar-render"/>
+<rect x="100" y="134.5" width="4.741707737679523" height="21.0" class="bar-parse"/>
+<rect x="104.74170773767952" y="134.5" width="33.076833962776256" height="21.0" class="bar-layout"/>
+<text x="121.28012471906764" y="149.0" text-anchor="middle" fill="white" font-size="9">2.66</text>
+<rect x="137.81854170045577" y="134.5" width="1.8123653262456183" height="21.0" class="bar-render"/>
 <text x="95" y="149.0" text-anchor="end" class="tick-label">class medium</text>
-<rect x="100" y="164.5" width="5.156522350295192" height="21.0" class="bar-parse"/>
-<rect x="105.15652235029519" y="164.5" width="2.3222518976665727" height="21.0" class="bar-layout"/>
-<rect x="107.47877424796177" y="164.5" width="1.38575344391341" height="21.0" class="bar-render"/>
+<rect x="100" y="164.5" width="4.050986531797073" height="21.0" class="bar-parse"/>
+<rect x="104.05098653179708" y="164.5" width="29.680788033854206" height="21.0" class="bar-layout"/>
+<text x="118.89138054872419" y="179.0" text-anchor="middle" fill="white" font-size="9">2.38</text>
+<rect x="133.73177456565128" y="164.5" width="1.120088441971541" height="21.0" class="bar-render"/>
 <text x="95" y="179.0" text-anchor="end" class="tick-label">state medium</text>
-<rect x="100" y="194.5" width="4.897209727298285" height="21.0" class="bar-parse"/>
-<rect x="104.89720972729829" y="194.5" width="0.40796317121169523" height="21.0" class="bar-layout"/>
-<rect x="105.30517289850998" y="194.5" width="0.9612735451222941" height="21.0" class="bar-render"/>
+<rect x="100" y="194.5" width="4.148994270469583" height="21.0" class="bar-parse"/>
+<rect x="104.14899427046959" y="194.5" width="0.4791489446211592" height="21.0" class="bar-layout"/>
+<rect x="104.62814321509074" y="194.5" width="0.7498369847642815" height="21.0" class="bar-render"/>
 <text x="95" y="209.0" text-anchor="end" class="tick-label">sequence medium</text>
 <rect x="100" y="270" width="12" height="12" class="bar-parse"/>
 <text x="117" y="280" class="legend">Parse</text>

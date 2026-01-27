@@ -54,9 +54,18 @@
 //! ## Supported Diagram Types
 //!
 //! - **Flowcharts** (`flowchart` / `graph`): TD, TB, LR, RL, BT directions
+//! - **Sequence Diagrams** (`sequenceDiagram`)
 //! - **Class Diagrams** (`classDiagram`)
 //! - **State Diagrams** (`stateDiagram-v2`)
-//! - **Sequence Diagrams** (`sequenceDiagram`)
+//! - **ER Diagrams** (`erDiagram`)
+//! - **Pie Charts** (`pie`)
+//! - **XY Charts** (`xychart`)
+//! - **Quadrant Charts** (`quadrantChart`)
+//! - **Gantt** (`gantt`)
+//! - **Timeline** (`timeline`)
+//! - **Journey** (`journey`)
+//! - **Mindmap** (`mindmap`)
+//! - **Git Graph** (`gitGraph`)
 //!
 //! ## Features
 //!
@@ -91,9 +100,9 @@ pub mod theme;
 // Re-export commonly used types at crate root for ergonomic library usage
 pub use config::{Config, LayoutConfig, RenderConfig};
 pub use ir::{
-    DiagramKind, Direction, Edge, EdgeArrowhead, EdgeDecoration, EdgeStyle, Graph, Node, NodeShape,
-    NodeLink, SequenceActivation, SequenceActivationKind, SequenceBox, StateNote, StateNotePosition,
-    Subgraph,
+    DiagramKind, Direction, Edge, EdgeArrowhead, EdgeDecoration, EdgeStyle, Graph, Node, NodeLink,
+    NodeShape, SequenceActivation, SequenceActivationKind, SequenceBox, StateNote,
+    StateNotePosition, Subgraph,
 };
 pub use layout::{EdgeLayout, Layout, NodeLayout, SubgraphLayout, compute_layout};
 pub use parser::{ParseOutput, parse_mermaid};
@@ -313,5 +322,19 @@ mod tests {
         )
         .unwrap();
         assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn test_pie_diagram() {
+        let svg = render(
+            r#"pie showData
+            title Pets
+            "Dogs" : 10
+            Cats : 5"#,
+        )
+        .unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("Dogs"));
+        assert!(!svg.contains("Syntax error in text"));
     }
 }

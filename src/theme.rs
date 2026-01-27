@@ -106,8 +106,7 @@ impl Theme {
             text_color: MERMAID_TEXT_COLOR.to_string(),
             git_colors: MERMAID_GIT_COLORS.map(|value| value.to_string()),
             git_inv_colors: MERMAID_GIT_INV_COLORS.map(|value| value.to_string()),
-            git_branch_label_colors: MERMAID_GIT_BRANCH_LABEL_COLORS
-                .map(|value| value.to_string()),
+            git_branch_label_colors: MERMAID_GIT_BRANCH_LABEL_COLORS.map(|value| value.to_string()),
             git_commit_label_color: MERMAID_GIT_COMMIT_LABEL_COLOR.to_string(),
             git_commit_label_background: MERMAID_GIT_COMMIT_LABEL_BG.to_string(),
             git_tag_label_color: MERMAID_GIT_TAG_LABEL_COLOR.to_string(),
@@ -156,8 +155,7 @@ impl Theme {
             text_color: "#1C2430".to_string(),
             git_colors: MERMAID_GIT_COLORS.map(|value| value.to_string()),
             git_inv_colors: MERMAID_GIT_INV_COLORS.map(|value| value.to_string()),
-            git_branch_label_colors: MERMAID_GIT_BRANCH_LABEL_COLORS
-                .map(|value| value.to_string()),
+            git_branch_label_colors: MERMAID_GIT_BRANCH_LABEL_COLORS.map(|value| value.to_string()),
             git_commit_label_color: MERMAID_GIT_COMMIT_LABEL_COLOR.to_string(),
             git_commit_label_background: MERMAID_GIT_COMMIT_LABEL_BG.to_string(),
             git_tag_label_color: MERMAID_GIT_TAG_LABEL_COLOR.to_string(),

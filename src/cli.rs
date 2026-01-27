@@ -462,10 +462,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = theme_vars.get("noteBkg").and_then(|v| v.as_str()) {
             config.theme.sequence_note_fill = val.to_string();
         }
-        if let Some(val) = theme_vars
-            .get("noteBorderColor")
-            .and_then(|v| v.as_str())
-        {
+        if let Some(val) = theme_vars.get("noteBorderColor").and_then(|v| v.as_str()) {
             config.theme.sequence_note_border = val.to_string();
         }
         if let Some(val) = theme_vars
@@ -663,16 +660,10 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         {
             config.layout.gitgraph.branch_label_bg_offset_y = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("branchLabelBgPadX")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("branchLabelBgPadX").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.branch_label_bg_pad_x = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("branchLabelBgPadY")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("branchLabelBgPadY").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.branch_label_bg_pad_y = val as f32;
         }
         if let Some(val) = gitgraph
@@ -717,10 +708,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         {
             config.layout.gitgraph.branch_label_corner_radius = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("branchLabelFontSize")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("branchLabelFontSize").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.branch_label_font_size = val as f32;
         }
         if let Some(val) = gitgraph
@@ -732,10 +720,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = gitgraph.get("textWidthScale").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.text_width_scale = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("commitLabelFontSize")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("commitLabelFontSize").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.commit_label_font_size = val as f32;
         }
         if let Some(val) = gitgraph
@@ -744,10 +729,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         {
             config.layout.gitgraph.commit_label_line_height = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("commitLabelOffsetY")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("commitLabelOffsetY").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.commit_label_offset_y = val as f32;
         }
         if let Some(val) = gitgraph
@@ -756,10 +738,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         {
             config.layout.gitgraph.commit_label_bg_offset_y = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("commitLabelPadding")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("commitLabelPadding").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.commit_label_padding = val as f32;
         }
         if let Some(val) = gitgraph
@@ -790,7 +769,10 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
             .get("commitLabelRotateTranslateXWidthOffset")
             .and_then(|v| v.as_f64())
         {
-            config.layout.gitgraph.commit_label_rotate_translate_x_width_offset = val as f32;
+            config
+                .layout
+                .gitgraph
+                .commit_label_rotate_translate_x_width_offset = val as f32;
         }
         if let Some(val) = gitgraph
             .get("commitLabelRotateTranslateYBase")
@@ -828,25 +810,16 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         {
             config.layout.gitgraph.commit_label_tb_bg_offset_y = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagLabelFontSize")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagLabelFontSize").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_label_font_size = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagLabelLineHeight")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagLabelLineHeight").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_label_line_height = val as f32;
         }
         if let Some(val) = gitgraph.get("tagTextOffsetY").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_text_offset_y = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagPolygonOffsetY")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagPolygonOffsetY").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_polygon_offset_y = val as f32;
         }
         if let Some(val) = gitgraph.get("tagSpacingY").and_then(|v| v.as_f64()) {
@@ -861,10 +834,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = gitgraph.get("tagHoleRadius").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_hole_radius = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagRotateTranslate")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagRotateTranslate").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_rotate_translate = val as f32;
         }
         if let Some(val) = gitgraph
@@ -876,22 +846,13 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = gitgraph.get("tagRotateAngle").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_rotate_angle = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagTextOffsetXTb")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagTextOffsetXTb").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_text_offset_x_tb = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("tagTextOffsetYTb")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("tagTextOffsetYTb").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.tag_text_offset_y_tb = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("arrowRerouteRadius")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("arrowRerouteRadius").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.arrow_reroute_radius = val as f32;
         }
         if let Some(val) = gitgraph.get("arrowRadius").and_then(|v| v.as_f64()) {
@@ -912,12 +873,10 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = gitgraph.get("mergeRadiusInner").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.merge_radius_inner = val as f32;
         }
-        if let Some(val) = gitgraph.get("highlightOuterSize").and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("highlightOuterSize").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.highlight_outer_size = val as f32;
         }
-        if let Some(val) = gitgraph.get("highlightInnerSize").and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("highlightInnerSize").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.highlight_inner_size = val as f32;
         }
         if let Some(val) = gitgraph.get("reverseCrossSize").and_then(|v| v.as_f64()) {
@@ -926,10 +885,7 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
         if let Some(val) = gitgraph.get("reverseStrokeWidth").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.reverse_stroke_width = val as f32;
         }
-        if let Some(val) = gitgraph
-            .get("cherryPickDotRadius")
-            .and_then(|v| v.as_f64())
-        {
+        if let Some(val) = gitgraph.get("cherryPickDotRadius").and_then(|v| v.as_f64()) {
             config.layout.gitgraph.cherry_pick_dot_radius = val as f32;
         }
         if let Some(val) = gitgraph
@@ -1001,10 +957,9 @@ fn merge_init_config(mut config: Config, init: serde_json::Value) -> Config {
                     _ => None,
                 })
             };
-        let get_bool =
-            |map: &serde_json::Map<String, serde_json::Value>, key: &str| -> Option<bool> {
-                map.get(key).and_then(|val| val.as_bool())
-            };
+        let get_bool = |map: &serde_json::Map<String, serde_json::Value>,
+                        key: &str|
+         -> Option<bool> { map.get(key).and_then(|val| val.as_bool()) };
         let get_string =
             |map: &serde_json::Map<String, serde_json::Value>, key: &str| -> Option<String> {
                 map.get(key)

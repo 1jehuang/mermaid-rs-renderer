@@ -632,10 +632,7 @@ fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout {
         boundary_map.insert(boundary.id.clone(), boundary);
     }
 
-    let root_boundaries = boundaries_by_parent
-        .get("")
-        .cloned()
-        .unwrap_or_default();
+    let root_boundaries = boundaries_by_parent.get("").cloned().unwrap_or_default();
 
     let mut global_max_x = conf.diagram_margin_x;
     let mut global_max_y = conf.diagram_margin_y;
@@ -931,26 +928,32 @@ fn layout_c4_boundaries(
         if idx == 0 || idx % conf.c4_boundary_in_row == 0 {
             let startx = parent_bounds.data.startx + conf.diagram_margin_x;
             let starty = parent_bounds.data.stopy + conf.diagram_margin_y + y;
-            current_bounds.set_data(startx, startx, starty, starty, current_bounds.data.width_limit);
+            current_bounds.set_data(
+                startx,
+                startx,
+                starty,
+                starty,
+                current_bounds.data.width_limit,
+            );
         } else {
-            let startx = if (current_bounds.data.stopx - current_bounds.data.startx).abs() > f32::EPSILON
-            {
-                current_bounds.data.stopx + conf.diagram_margin_x
-            } else {
-                current_bounds.data.startx
-            };
+            let startx =
+                if (current_bounds.data.stopx - current_bounds.data.startx).abs() > f32::EPSILON {
+                    current_bounds.data.stopx + conf.diagram_margin_x
+                } else {
+                    current_bounds.data.startx
+                };
             let starty = current_bounds.data.starty;
-            current_bounds.set_data(startx, startx, starty, starty, current_bounds.data.width_limit);
+            current_bounds.set_data(
+                startx,
+                startx,
+                starty,
+                starty,
+                current_bounds.data.width_limit,
+            );
         }
 
         if let Some(shape_ids) = shapes_by_boundary.get(boundary_id) {
-            layout_c4_shapes(
-                &mut current_bounds,
-                shape_ids,
-                shapes_out,
-                shape_map,
-                conf,
-            );
+            layout_c4_shapes(&mut current_bounds, shape_ids, shapes_out, shape_map, conf);
         }
 
         if let Some(child_boundaries) = boundaries_by_parent.get(boundary_id) {
@@ -1240,7 +1243,11 @@ fn c4_intersect_point(node: &C4ShapeLayout, end: (f32, f32)) -> (f32, f32) {
     let from_center_y = y1 + node.height / 2.0;
     let dx = (x1 - x2).abs();
     let dy = (y1 - y2).abs();
-    let tan_dyx = if dx.abs() < f32::EPSILON { 0.0 } else { dy / dx };
+    let tan_dyx = if dx.abs() < f32::EPSILON {
+        0.0
+    } else {
+        dy / dx
+    };
     let from_dyx = node.height / node.width;
     if (y1 - y2).abs() < f32::EPSILON && x1 < x2 {
         return (x1 + node.width, from_center_y);
@@ -1258,7 +1265,10 @@ fn c4_intersect_point(node: &C4ShapeLayout, end: (f32, f32)) -> (f32, f32) {
         if from_dyx >= tan_dyx {
             (x1, from_center_y + tan_dyx * node.width / 2.0)
         } else {
-            (from_center_x - dx / dy * node.height / 2.0, y1 + node.height)
+            (
+                from_center_x - dx / dy * node.height / 2.0,
+                y1 + node.height,
+            )
         }
     } else if x1 < x2 && y1 < y2 {
         if from_dyx >= tan_dyx {
@@ -1758,7 +1768,13 @@ fn compute_mindmap_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
     let vertical_gap = config.mindmap.node_spacing * config.mindmap.node_spacing_multiplier;
 
     if let Some(root_id) = root_id.as_ref() {
-        mindmap_subtree_height(root_id, &info_map, &nodes, &mut subtree_heights, vertical_gap);
+        mindmap_subtree_height(
+            root_id,
+            &info_map,
+            &nodes,
+            &mut subtree_heights,
+            vertical_gap,
+        );
         let root_center = (0.0_f32, 0.0_f32);
         if let Some(root_node) = nodes.get_mut(root_id) {
             root_node.x = root_center.0 - root_node.width / 2.0;
@@ -1907,10 +1923,7 @@ fn compute_mindmap_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
 
 fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
     let gg = &config.gitgraph;
-    let is_vertical = matches!(
-        graph.direction,
-        Direction::TopDown | Direction::BottomTop
-    );
+    let is_vertical = matches!(graph.direction, Direction::TopDown | Direction::BottomTop);
     let is_bottom_top = graph.direction == Direction::BottomTop;
     let mut branches = graph.gitgraph.branches.clone();
     if branches.is_empty() {
@@ -1924,7 +1937,9 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
     let mut branch_entries: Vec<(crate::ir::GitGraphBranch, f32)> = branches
         .into_iter()
         .map(|branch| {
-            let order = branch.order.unwrap_or_else(|| default_branch_order(branch.insertion_index));
+            let order = branch
+                .order
+                .unwrap_or_else(|| default_branch_order(branch.insertion_index));
             (branch, order)
         })
         .collect();
@@ -2132,7 +2147,8 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
                     let y_origin = axis_pos + tag_offset;
                     let px = gg.tag_padding_x;
                     let py = gg.tag_padding_y;
-                    let text_translate_delta = gg.tag_text_rotate_translate - gg.tag_rotate_translate;
+                    let text_translate_delta =
+                        gg.tag_text_rotate_translate - gg.tag_rotate_translate;
                     let text_x = x + gg.tag_text_offset_x_tb + text_translate_delta;
                     let text_y = y_origin + gg.tag_text_offset_y_tb + text_translate_delta;
                     let points = vec![
@@ -2221,7 +2237,6 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
         if pos > max_pos {
             max_pos = pos;
         }
-
     }
 
     if is_bottom_top {
@@ -2254,10 +2269,8 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
                         gg,
                         &mut lanes,
                     );
-                    let mut color_index = branch_pos
-                        .get(&commit_b.branch)
-                        .map(|v| v.1)
-                        .unwrap_or(0);
+                    let mut color_index =
+                        branch_pos.get(&commit_b.branch).map(|v| v.1).unwrap_or(0);
                     if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
                         && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_default()
                     {
@@ -2279,13 +2292,23 @@ fn compute_gitgraph_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
 
     for branch in &branch_layouts {
         let (x1, y1, x2, y2) = if is_vertical {
-            let start = if is_bottom_top { max_pos } else { gg.default_pos };
-            let end = if is_bottom_top { gg.default_pos } else { max_pos };
+            let start = if is_bottom_top {
+                max_pos
+            } else {
+                gg.default_pos
+            };
+            let end = if is_bottom_top {
+                gg.default_pos
+            } else {
+                max_pos
+            };
             (branch.pos, start, branch.pos, end)
         } else {
             (0.0, branch.pos, max_pos, branch.pos)
         };
-        update_bounds_line(&mut min_x, &mut min_y, &mut max_x, &mut max_y, x1, y1, x2, y2);
+        update_bounds_line(
+            &mut min_x, &mut min_y, &mut max_x, &mut max_y, x1, y1, x2, y2,
+        );
         update_bounds_rect(
             &mut min_x,
             &mut min_y,
@@ -2486,11 +2509,8 @@ fn gitgraph_find_closest_parent_pos(
     commit: &crate::ir::GitGraphCommit,
     commit_pos: &HashMap<String, (f32, f32)>,
 ) -> Option<f32> {
-    let closest_parent = gitgraph_find_closest_parent(
-        &commit.parents,
-        commit_pos,
-        Direction::BottomTop,
-    )?;
+    let closest_parent =
+        gitgraph_find_closest_parent(&commit.parents, commit_pos, Direction::BottomTop)?;
     commit_pos.get(&closest_parent).map(|(_x, y)| *y)
 }
 
@@ -2560,7 +2580,8 @@ fn gitgraph_set_parallel_bt_pos(
     }
     for commit in commits {
         if !commit.parents.is_empty() {
-            if let Some(closest_parent) = gitgraph_find_closest_parent_bt(&commit.parents, commit_pos)
+            if let Some(closest_parent) =
+                gitgraph_find_closest_parent_bt(&commit.parents, commit_pos)
             {
                 if let Some((_x, y)) = commit_pos.get(&closest_parent) {
                     cur_pos = *y - commit_step;
@@ -2589,7 +2610,10 @@ fn gitgraph_calculate_position(
     let default_commit_pos = (0.0, 0.0);
     if !commit.parents.is_empty() {
         if let Some(parent) = gitgraph_find_closest_parent(&commit.parents, commit_pos, dir) {
-            let parent_pos = commit_pos.get(&parent).cloned().unwrap_or(default_commit_pos);
+            let parent_pos = commit_pos
+                .get(&parent)
+                .cloned()
+                .unwrap_or(default_commit_pos);
             if dir == Direction::TopDown {
                 return parent_pos.1 + commit_step;
             } else if dir == Direction::BottomTop {
@@ -2694,11 +2718,7 @@ fn update_bounds_points(
     }
 }
 
-fn apply_transform_point(
-    x: f32,
-    y: f32,
-    transform: Option<&GitGraphTransform>,
-) -> (f32, f32) {
+fn apply_transform_point(x: f32, y: f32, transform: Option<&GitGraphTransform>) -> (f32, f32) {
     if let Some(transform) = transform {
         let mut px = x + transform.translate_x;
         let mut py = y + transform.translate_y;
@@ -2826,12 +2846,7 @@ fn gitgraph_arrow_path(
         Direction::TopDown => {
             if p1x < p2x {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {p1x} {y1} {arc} {x1} {p2y} L {p2x} {p2y}",
@@ -2848,12 +2863,7 @@ fn gitgraph_arrow_path(
             }
             if p1x > p2x {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {p1x} {y1} {arc2} {x1} {p2y} L {p2x} {p2y}",
@@ -2875,12 +2885,7 @@ fn gitgraph_arrow_path(
         Direction::BottomTop => {
             if p1x < p2x {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {p1x} {y1} {arc2} {x1} {p2y} L {p2x} {p2y}",
@@ -2897,12 +2902,7 @@ fn gitgraph_arrow_path(
             }
             if p1x > p2x {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {p1x} {y1} {arc} {x1} {p2y} L {p2x} {p2y}",
@@ -2924,12 +2924,7 @@ fn gitgraph_arrow_path(
         _ => {
             if p1y < p2y {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {x1} {p1y} {arc2} {p2x} {y1} L {p2x} {p2y}",
@@ -2946,12 +2941,7 @@ fn gitgraph_arrow_path(
             }
             if p1y > p2y {
                 if commit_b.commit_type == crate::ir::GitGraphCommitType::Merge
-                    && commit_a.id
-                        != commit_b
-                            .parents
-                            .get(0)
-                            .cloned()
-                            .unwrap_or_else(String::new)
+                    && commit_a.id != commit_b.parents.get(0).cloned().unwrap_or_else(String::new)
                 {
                     line_def = format!(
                         "M {p1x} {p1y} L {x1} {p1y} {arc} {p2x} {y1} L {p2x} {p2y}",
@@ -3002,7 +2992,13 @@ fn should_reroute_arrow(
     })
 }
 
-fn find_lane(y1: f32, y2: f32, lanes: &mut Vec<f32>, config: &crate::config::GitGraphConfig, depth: usize) -> f32 {
+fn find_lane(
+    y1: f32,
+    y2: f32,
+    lanes: &mut Vec<f32>,
+    config: &crate::config::GitGraphConfig,
+    depth: usize,
+) -> f32 {
     let candidate = y1 + (y2 - y1).abs() / 2.0;
     if depth > config.lane_max_depth {
         return candidate;
@@ -3046,7 +3042,11 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
     let mut filtered: Vec<PieDatum> = Vec::new();
     for (idx, slice) in graph.pie_slices.iter().enumerate() {
         let value = slice.value.max(0.0);
-        let percent = if total > 0.0 { value / total * 100.0 } else { 0.0 };
+        let percent = if total > 0.0 {
+            value / total * 100.0
+        } else {
+            0.0
+        };
         if percent >= pie_cfg.min_percent {
             filtered.push(PieDatum {
                 index: idx,
@@ -3081,12 +3081,8 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         } else {
             std::f32::consts::PI * 2.0 / fallback_total
         };
-        let label = measure_label_with_font_size(
-            &datum.label,
-            theme.pie_section_text_size,
-            config,
-            false,
-        );
+        let label =
+            measure_label_with_font_size(&datum.label, theme.pie_section_text_size, config, false);
         let color = resolve_color(&datum.label);
         slices.push(PieSliceLayout {
             label,
@@ -3106,12 +3102,8 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         } else {
             slice.label.clone()
         };
-        let label = measure_label_with_font_size(
-            &label_text,
-            theme.pie_legend_text_size,
-            config,
-            false,
-        );
+        let label =
+            measure_label_with_font_size(&label_text, theme.pie_legend_text_size, config, false);
         legend_width = legend_width.max(label.width);
         let color = resolve_color(&slice.label);
         legend_items.push((label, color));
@@ -3139,8 +3131,11 @@ fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> La
         });
     }
 
-    let width =
-        pie_width + pie_cfg.margin + pie_cfg.legend_rect_size + pie_cfg.legend_spacing + legend_width;
+    let width = pie_width
+        + pie_cfg.margin
+        + pie_cfg.legend_rect_size
+        + pie_cfg.legend_spacing
+        + legend_width;
     let title_layout = title_block.map(|text| PieTitleLayout {
         x: center_x,
         y: center_y - (height - 50.0) / 2.0,
@@ -3182,41 +3177,81 @@ fn compute_quadrant_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
     let padding = theme.font_size * 2.0;
     let grid_size = 400.0;
     // Measure title
-    let title = graph.quadrant.title.as_ref().map(|t| measure_label(t, theme, config));
+    let title = graph
+        .quadrant
+        .title
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
     let title_height = title.as_ref().map(|t| t.height + padding).unwrap_or(0.0);
 
     // Measure axis labels
-    let x_left = graph.quadrant.x_axis_left.as_ref().map(|t| measure_label(t, theme, config));
-    let x_right = graph.quadrant.x_axis_right.as_ref().map(|t| measure_label(t, theme, config));
-    let y_bottom = graph.quadrant.y_axis_bottom.as_ref().map(|t| measure_label(t, theme, config));
-    let y_top = graph.quadrant.y_axis_top.as_ref().map(|t| measure_label(t, theme, config));
+    let x_left = graph
+        .quadrant
+        .x_axis_left
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
+    let x_right = graph
+        .quadrant
+        .x_axis_right
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
+    let y_bottom = graph
+        .quadrant
+        .y_axis_bottom
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
+    let y_top = graph
+        .quadrant
+        .y_axis_top
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
 
     // Measure quadrant labels
     let q_labels: [Option<TextBlock>; 4] = [
-        graph.quadrant.quadrant_labels[0].as_ref().map(|t| measure_label(t, theme, config)),
-        graph.quadrant.quadrant_labels[1].as_ref().map(|t| measure_label(t, theme, config)),
-        graph.quadrant.quadrant_labels[2].as_ref().map(|t| measure_label(t, theme, config)),
-        graph.quadrant.quadrant_labels[3].as_ref().map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[0]
+            .as_ref()
+            .map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[1]
+            .as_ref()
+            .map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[2]
+            .as_ref()
+            .map(|t| measure_label(t, theme, config)),
+        graph.quadrant.quadrant_labels[3]
+            .as_ref()
+            .map(|t| measure_label(t, theme, config)),
     ];
 
-    let y_axis_width = y_bottom.as_ref().map(|t| t.height + padding).unwrap_or(padding);
-    let x_axis_height = x_left.as_ref().map(|t| t.height + padding).unwrap_or(padding);
+    let y_axis_width = y_bottom
+        .as_ref()
+        .map(|t| t.height + padding)
+        .unwrap_or(padding);
+    let x_axis_height = x_left
+        .as_ref()
+        .map(|t| t.height + padding)
+        .unwrap_or(padding);
 
     let grid_x = y_axis_width + padding;
     let grid_y = title_height + padding;
 
     // Layout points
     let palette = quadrant_palette(theme);
-    let points: Vec<QuadrantPointLayout> = graph.quadrant.points.iter().enumerate().map(|(i, p)| {
-        let px = grid_x + p.x.clamp(0.0, 1.0) * grid_size;
-        let py = grid_y + (1.0 - p.y.clamp(0.0, 1.0)) * grid_size; // Invert Y
-        QuadrantPointLayout {
-            label: measure_label(&p.label, theme, config),
-            x: px,
-            y: py,
-            color: palette[i % palette.len()].clone(),
-        }
-    }).collect();
+    let points: Vec<QuadrantPointLayout> = graph
+        .quadrant
+        .points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let px = grid_x + p.x.clamp(0.0, 1.0) * grid_size;
+            let py = grid_y + (1.0 - p.y.clamp(0.0, 1.0)) * grid_size; // Invert Y
+            QuadrantPointLayout {
+                label: measure_label(&p.label, theme, config),
+                x: px,
+                y: py,
+                color: palette[i % palette.len()].clone(),
+            }
+        })
+        .collect();
 
     let width = grid_x + grid_size + padding * 2.0;
     let height = grid_y + grid_size + x_axis_height + padding;
@@ -3283,7 +3318,10 @@ fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> 
     let chart_width = 400.0;
 
     // Title
-    let title = graph.gantt_title.as_ref().map(|t| measure_label(t, theme, config));
+    let title = graph
+        .gantt_title
+        .as_ref()
+        .map(|t| measure_label(t, theme, config));
     let title_height = title.as_ref().map(|t| t.height + padding).unwrap_or(0.0);
 
     let chart_x = padding + label_width;
@@ -3393,8 +3431,8 @@ fn compute_sankey_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) ->
     const SANKEY_HEIGHT: f32 = 400.0;
     const SANKEY_NODE_WIDTH: f32 = 10.0;
     const SANKEY_PALETTE: [&str; 10] = [
-        "#4e79a7", "#f28e2c", "#e15759", "#76b7b2", "#59a14f", "#edc949", "#af7aa1",
-        "#ff9da7", "#9c755f", "#bab0ab",
+        "#4e79a7", "#f28e2c", "#e15759", "#76b7b2", "#59a14f", "#edc949", "#af7aa1", "#ff9da7",
+        "#9c755f", "#bab0ab",
     ];
 
     let mut node_ids: Vec<String> = graph.nodes.keys().cloned().collect();
@@ -4174,36 +4212,55 @@ fn compute_xychart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
     let y_axis_width = 60.0;
     let x_axis_height = 40.0;
     let title_height = if data.title.is_some() { 30.0 } else { 0.0 };
-    
+
     let plot_width = 400.0;
     let plot_height = 250.0;
-    
+
     let width = padding * 2.0 + y_axis_width + plot_width;
     let height = padding * 2.0 + title_height + plot_height + x_axis_height;
-    
+
     let plot_x = padding + y_axis_width;
     let plot_y = padding + title_height;
-    
+
     // Find min/max values
-    let all_values: Vec<f32> = data.series.iter()
+    let all_values: Vec<f32> = data
+        .series
+        .iter()
         .flat_map(|s| s.values.iter().copied())
         .collect();
-    let min_val = data.y_axis_min.unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::min).min(0.0));
-    let max_val = data.y_axis_max.unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::max));
+    let min_val = data
+        .y_axis_min
+        .unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::min).min(0.0));
+    let max_val = data
+        .y_axis_max
+        .unwrap_or_else(|| all_values.iter().copied().fold(0.0_f32, f32::max));
     let range = (max_val - min_val).max(1.0);
-    
+
     // Number of categories
-    let num_categories = data.x_axis_categories.len().max(
-        data.series.iter().map(|s| s.values.len()).max().unwrap_or(0)
-    ).max(1);
-    
+    let num_categories = data
+        .x_axis_categories
+        .len()
+        .max(
+            data.series
+                .iter()
+                .map(|s| s.values.len())
+                .max()
+                .unwrap_or(0),
+        )
+        .max(1);
+
     let bar_group_width = plot_width / num_categories as f32;
     let bar_padding = bar_group_width * 0.1;
-    
+
     // Count bar series for width calculation
-    let bar_count = data.series.iter().filter(|s| s.kind == crate::ir::XYSeriesKind::Bar).count().max(1);
+    let bar_count = data
+        .series
+        .iter()
+        .filter(|s| s.kind == crate::ir::XYSeriesKind::Bar)
+        .count()
+        .max(1);
     let bar_width = (bar_group_width - bar_padding * 2.0) / bar_count as f32;
-    
+
     let colors = vec![
         "#4e79a7".to_string(),
         "#f28e2c".to_string(),
@@ -4214,21 +4271,27 @@ fn compute_xychart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
         "#af7aa1".to_string(),
         "#ff9da7".to_string(),
     ];
-    
+
     let mut bars = Vec::new();
     let mut lines = Vec::new();
     let mut bar_series_idx = 0;
-    
+
     for (series_idx, series) in data.series.iter().enumerate() {
-        let color = colors.get(series_idx % colors.len()).cloned().unwrap_or_else(|| "#333".to_string());
-        
+        let color = colors
+            .get(series_idx % colors.len())
+            .cloned()
+            .unwrap_or_else(|| "#333".to_string());
+
         match series.kind {
             crate::ir::XYSeriesKind::Bar => {
                 for (i, &value) in series.values.iter().enumerate() {
                     let bar_height = ((value - min_val) / range) * plot_height;
-                    let x = plot_x + i as f32 * bar_group_width + bar_padding + bar_series_idx as f32 * bar_width;
+                    let x = plot_x
+                        + i as f32 * bar_group_width
+                        + bar_padding
+                        + bar_series_idx as f32 * bar_width;
                     let y = plot_y + plot_height - bar_height;
-                    
+
                     bars.push(XYChartBarLayout {
                         x,
                         y,
@@ -4241,38 +4304,53 @@ fn compute_xychart_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -
                 bar_series_idx += 1;
             }
             crate::ir::XYSeriesKind::Line => {
-                let points: Vec<(f32, f32)> = series.values.iter().enumerate().map(|(i, &value)| {
-                    let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
-                    let y = plot_y + plot_height - ((value - min_val) / range) * plot_height;
-                    (x, y)
-                }).collect();
-                
-                lines.push(XYChartLineLayout {
-                    points,
-                    color,
-                });
+                let points: Vec<(f32, f32)> = series
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &value)| {
+                        let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
+                        let y = plot_y + plot_height - ((value - min_val) / range) * plot_height;
+                        (x, y)
+                    })
+                    .collect();
+
+                lines.push(XYChartLineLayout { points, color });
             }
         }
     }
-    
+
     // X-axis categories
-    let x_axis_categories: Vec<(String, f32)> = data.x_axis_categories.iter().enumerate().map(|(i, cat)| {
-        let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
-        (cat.clone(), x)
-    }).collect();
-    
+    let x_axis_categories: Vec<(String, f32)> = data
+        .x_axis_categories
+        .iter()
+        .enumerate()
+        .map(|(i, cat)| {
+            let x = plot_x + i as f32 * bar_group_width + bar_group_width / 2.0;
+            (cat.clone(), x)
+        })
+        .collect();
+
     // Y-axis ticks
     let num_ticks = 5;
-    let y_axis_ticks: Vec<(String, f32)> = (0..=num_ticks).map(|i| {
-        let value = min_val + (i as f32 / num_ticks as f32) * range;
-        let y = plot_y + plot_height - (i as f32 / num_ticks as f32) * plot_height;
-        (format!("{:.0}", value), y)
-    }).collect();
-    
+    let y_axis_ticks: Vec<(String, f32)> = (0..=num_ticks)
+        .map(|i| {
+            let value = min_val + (i as f32 / num_ticks as f32) * range;
+            let y = plot_y + plot_height - (i as f32 / num_ticks as f32) * plot_height;
+            (format!("{:.0}", value), y)
+        })
+        .collect();
+
     let title = data.title.as_ref().map(|t| measure_label(t, theme, config));
-    let x_axis_label = data.x_axis_label.as_ref().map(|l| measure_label(l, theme, config));
-    let y_axis_label = data.y_axis_label.as_ref().map(|l| measure_label(l, theme, config));
-    
+    let x_axis_label = data
+        .x_axis_label
+        .as_ref()
+        .map(|l| measure_label(l, theme, config));
+    let y_axis_label = data
+        .y_axis_label
+        .as_ref()
+        .map(|l| measure_label(l, theme, config));
+
     Layout {
         kind: graph.kind,
         nodes: BTreeMap::new(),
@@ -4330,50 +4408,63 @@ fn compute_timeline_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) 
     let event_spacing = 40.0;
     let title_height = if data.title.is_some() { 40.0 } else { 0.0 };
     let line_y = padding + title_height + 60.0;
-    
+
     let num_events = data.events.len().max(1);
-    let total_events_width = num_events as f32 * event_width + (num_events - 1).max(0) as f32 * event_spacing;
-    
+    let total_events_width =
+        num_events as f32 * event_width + (num_events - 1).max(0) as f32 * event_spacing;
+
     let width = padding * 2.0 + total_events_width;
     let height = padding * 2.0 + title_height + event_height + 100.0;
-    
+
     let title = data.title.as_ref().map(|t| measure_label(t, theme, config));
-    
-    let events: Vec<TimelineEventLayout> = data.events.iter().enumerate().map(|(i, event)| {
-        let x = padding + i as f32 * (event_width + event_spacing);
-        let y = line_y + 30.0;
-        
-        let time_block = measure_label(&event.time, theme, config);
-        let event_blocks: Vec<TextBlock> = event.events.iter()
-            .map(|e| measure_label(e, theme, config))
-            .collect();
-        
-        TimelineEventLayout {
-            time: time_block,
-            events: event_blocks,
-            x,
-            y,
-            width: event_width,
-            height: event_height,
-            circle_y: line_y,
-        }
-    }).collect();
-    
+
+    let events: Vec<TimelineEventLayout> = data
+        .events
+        .iter()
+        .enumerate()
+        .map(|(i, event)| {
+            let x = padding + i as f32 * (event_width + event_spacing);
+            let y = line_y + 30.0;
+
+            let time_block = measure_label(&event.time, theme, config);
+            let event_blocks: Vec<TextBlock> = event
+                .events
+                .iter()
+                .map(|e| measure_label(e, theme, config))
+                .collect();
+
+            TimelineEventLayout {
+                time: time_block,
+                events: event_blocks,
+                x,
+                y,
+                width: event_width,
+                height: event_height,
+                circle_y: line_y,
+            }
+        })
+        .collect();
+
     let line_start_x = padding;
     let line_end_x = width - padding;
-    
+
     // Sections (simplified - just record them)
-    let sections: Vec<TimelineSectionLayout> = data.sections.iter().enumerate().map(|(i, section)| {
-        let label = measure_label(section, theme, config);
-        TimelineSectionLayout {
-            label,
-            x: padding + i as f32 * 200.0,
-            y: padding,
-            width: 180.0,
-            height: 30.0,
-        }
-    }).collect();
-    
+    let sections: Vec<TimelineSectionLayout> = data
+        .sections
+        .iter()
+        .enumerate()
+        .map(|(i, section)| {
+            let label = measure_label(section, theme, config);
+            TimelineSectionLayout {
+                label,
+                x: padding + i as f32 * 200.0,
+                y: padding,
+                width: 180.0,
+                height: 30.0,
+            }
+        })
+        .collect();
+
     Layout {
         kind: graph.kind,
         nodes: BTreeMap::new(),
@@ -7852,10 +7943,7 @@ fn enforce_top_level_subgraph_gap(
             .then_with(|| a.idx.cmp(&b.idx))
     });
 
-    let pad_main = bounds
-        .iter()
-        .map(|b| b.pad_main)
-        .fold(0.0_f32, f32::max);
+    let pad_main = bounds.iter().map(|b| b.pad_main).fold(0.0_f32, f32::max);
     let desired_gap = (config.node_spacing * 1.6).max(pad_main * 2.0);
 
     let mut prev_max_main: Option<f32> = None;
@@ -7983,7 +8071,8 @@ fn separate_sibling_subgraphs(
         }
 
         let gap = config.node_spacing.max(8.0);
-        let overlaps = |a_min: f32, a_max: f32, b_min: f32, b_max: f32| a_min < b_max && b_min < a_max;
+        let overlaps =
+            |a_min: f32, a_max: f32, b_min: f32, b_max: f32| a_min < b_max && b_min < a_max;
 
         let mut placed: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
         for (idx, min_x, min_y, max_x, max_y) in bounds {
@@ -7999,8 +8088,16 @@ fn separate_sibling_subgraphs(
                     continue;
                 }
 
-                let shifted_min = if is_horizontal { min_y + shift } else { min_x + shift };
-                let shifted_max = if is_horizontal { max_y + shift } else { max_x + shift };
+                let shifted_min = if is_horizontal {
+                    min_y + shift
+                } else {
+                    min_x + shift
+                };
+                let shifted_max = if is_horizontal {
+                    max_y + shift
+                } else {
+                    max_x + shift
+                };
                 let placed_min = if is_horizontal { py1 } else { px1 };
                 let placed_max = if is_horizontal { py2 } else { px2 };
 

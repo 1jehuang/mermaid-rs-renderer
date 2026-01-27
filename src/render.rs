@@ -12,82 +12,95 @@ use std::path::Path;
 
 pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> String {
     let mut svg = String::new();
-    let (mut width, mut height, mut viewbox_x, mut viewbox_y, mut viewbox_width, mut viewbox_height) =
-        if let Some(error) = layout.error.as_ref() {
-            (
-                error.render_width,
-                error.render_height,
-                0.0,
-                0.0,
-                error.viewbox_width,
-                error.viewbox_height,
-            )
-        } else if layout.kind == crate::ir::DiagramKind::Requirement {
-            let pad_x = config.requirement.render_padding_x;
-            let pad_y = config.requirement.render_padding_y;
-            let mut width = layout.width + pad_x * 2.0;
-            let mut height = layout.height + pad_y * 2.0;
-            width = width.max(1.0);
-            height = height.max(1.0);
-            (width, height, 0.0, 0.0, width, height)
-        } else if let Some(c4) = layout.c4.as_ref() {
-            let width = layout.width.max(1.0);
-            let height = layout.height.max(1.0);
-            (
-                width,
-                height,
-                c4.viewbox_x,
-                c4.viewbox_y,
-                c4.viewbox_width,
-                c4.viewbox_height,
-            )
-        } else if let Some(gitgraph) = layout.gitgraph.as_ref() {
-            let width = layout.width.max(1.0);
-            let height = layout.height.max(1.0);
-            let viewbox_x = -gitgraph.offset_x;
-            let viewbox_y = -gitgraph.offset_y;
-            (width, height, viewbox_x, viewbox_y, gitgraph.width, gitgraph.height)
-        } else if layout.kind == crate::ir::DiagramKind::Mindmap {
-            let pad = config.mindmap.padding;
-            let mut min_x = f32::MAX;
-            let mut min_y = f32::MAX;
-            let mut max_x = f32::MIN;
-            let mut max_y = f32::MIN;
-            for node in layout.nodes.values() {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-            if min_x == f32::MAX {
-                min_x = 0.0;
-                max_x = 1.0;
-            }
-            if min_y == f32::MAX {
-                min_y = 0.0;
-                max_y = 1.0;
-            }
-            let width = (max_x - min_x + pad * 2.0).max(1.0);
-            let height = (max_y - min_y + pad * 2.0).max(1.0);
-            let viewbox_x = min_x - pad;
-            let viewbox_y = min_y - pad;
-            (width, height, viewbox_x, viewbox_y, width, height)
-        } else {
-            let width = layout.width.max(1.0);
-            let height = layout.height.max(1.0);
-            (width, height, 0.0, 0.0, width, height)
-        };
+    let (
+        mut width,
+        mut height,
+        mut viewbox_x,
+        mut viewbox_y,
+        mut viewbox_width,
+        mut viewbox_height,
+    ) = if let Some(error) = layout.error.as_ref() {
+        (
+            error.render_width,
+            error.render_height,
+            0.0,
+            0.0,
+            error.viewbox_width,
+            error.viewbox_height,
+        )
+    } else if layout.kind == crate::ir::DiagramKind::Requirement {
+        let pad_x = config.requirement.render_padding_x;
+        let pad_y = config.requirement.render_padding_y;
+        let mut width = layout.width + pad_x * 2.0;
+        let mut height = layout.height + pad_y * 2.0;
+        width = width.max(1.0);
+        height = height.max(1.0);
+        (width, height, 0.0, 0.0, width, height)
+    } else if let Some(c4) = layout.c4.as_ref() {
+        let width = layout.width.max(1.0);
+        let height = layout.height.max(1.0);
+        (
+            width,
+            height,
+            c4.viewbox_x,
+            c4.viewbox_y,
+            c4.viewbox_width,
+            c4.viewbox_height,
+        )
+    } else if let Some(gitgraph) = layout.gitgraph.as_ref() {
+        let width = layout.width.max(1.0);
+        let height = layout.height.max(1.0);
+        let viewbox_x = -gitgraph.offset_x;
+        let viewbox_y = -gitgraph.offset_y;
+        (
+            width,
+            height,
+            viewbox_x,
+            viewbox_y,
+            gitgraph.width,
+            gitgraph.height,
+        )
+    } else if layout.kind == crate::ir::DiagramKind::Mindmap {
+        let pad = config.mindmap.padding;
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        for node in layout.nodes.values() {
+            min_x = min_x.min(node.x);
+            min_y = min_y.min(node.y);
+            max_x = max_x.max(node.x + node.width);
+            max_y = max_y.max(node.y + node.height);
+        }
+        if min_x == f32::MAX {
+            min_x = 0.0;
+            max_x = 1.0;
+        }
+        if min_y == f32::MAX {
+            min_y = 0.0;
+            max_y = 1.0;
+        }
+        let width = (max_x - min_x + pad * 2.0).max(1.0);
+        let height = (max_y - min_y + pad * 2.0).max(1.0);
+        let viewbox_x = min_x - pad;
+        let viewbox_y = min_y - pad;
+        (width, height, viewbox_x, viewbox_y, width, height)
+    } else {
+        let width = layout.width.max(1.0);
+        let height = layout.height.max(1.0);
+        (width, height, 0.0, 0.0, width, height)
+    };
     let is_sequence = !layout.sequence_footboxes.is_empty();
     let is_state = layout.kind == crate::ir::DiagramKind::State;
     let is_class = layout.kind == crate::ir::DiagramKind::Class;
     let is_pie = layout.kind == crate::ir::DiagramKind::Pie;
     let is_c4 = layout.c4.is_some();
     let has_links = is_c4
+        || layout.nodes.values().any(|node| node.link.is_some())
         || layout
-            .nodes
-            .values()
-            .any(|node| node.link.is_some())
-        || layout.sequence_footboxes.iter().any(|node| node.link.is_some());
+            .sequence_footboxes
+            .iter()
+            .any(|node| node.link.is_some());
 
     let mut width_attr = width.to_string();
     let mut height_attr = height.to_string();
@@ -382,10 +395,7 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
     if is_sequence {
         for seq_box in &layout.sequence_boxes {
             let stroke = theme.primary_border_color.as_str();
-            let fill = seq_box
-                .color
-                .as_deref()
-                .unwrap_or("none");
+            let fill = seq_box.color.as_deref().unwrap_or("none");
             let mut fill_attr = format!("fill=\"{}\"", fill);
             if seq_box.color.is_some() && fill != "none" {
                 fill_attr.push_str(" fill-opacity=\"0.12\"");
@@ -639,14 +649,26 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                 && let Some((x, y)) = edge_endpoint_label_position(edge, true, end_label_offset)
             {
                 svg.push_str(&text_block_svg(
-                    x, y, label, theme, config, false, Some(label_color),
+                    x,
+                    y,
+                    label,
+                    theme,
+                    config,
+                    false,
+                    Some(label_color),
                 ));
             }
             if let Some(label) = edge.end_label.as_ref()
                 && let Some((x, y)) = edge_endpoint_label_position(edge, false, end_label_offset)
             {
                 svg.push_str(&text_block_svg(
-                    x, y, label, theme, config, false, Some(label_color),
+                    x,
+                    y,
+                    label,
+                    theme,
+                    config,
+                    false,
+                    Some(label_color),
                 ));
             }
         }
@@ -810,14 +832,26 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                 && let Some((x, y)) = edge_endpoint_label_position(edge, true, end_label_offset)
             {
                 svg.push_str(&text_block_svg(
-                    x, y, label, theme, config, false, Some(label_color),
+                    x,
+                    y,
+                    label,
+                    theme,
+                    config,
+                    false,
+                    Some(label_color),
                 ));
             }
             if let Some(label) = edge.end_label.as_ref()
                 && let Some((x, y)) = edge_endpoint_label_position(edge, false, end_label_offset)
             {
                 svg.push_str(&text_block_svg(
-                    x, y, label, theme, config, false, Some(label_color),
+                    x,
+                    y,
+                    label,
+                    theme,
+                    config,
+                    false,
+                    Some(label_color),
                 ));
             }
         }
@@ -1171,7 +1205,8 @@ fn render_error(layout: &ErrorLayout, _theme: &Theme, _config: &LayoutConfig) ->
     ];
 
     let mut svg = String::new();
-    let needs_transform = layout.icon_scale != 1.0 || layout.icon_tx != 0.0 || layout.icon_ty != 0.0;
+    let needs_transform =
+        layout.icon_scale != 1.0 || layout.icon_tx != 0.0 || layout.icon_ty != 0.0;
 
     let fmt = |value: f32| -> String {
         if (value - value.round()).abs() < 0.001 {
@@ -1350,20 +1385,13 @@ fn render_requirement(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> 
         if node.anchor_subgraph.is_some() {
             continue;
         }
-        let fill = node
-            .style
-            .fill
-            .as_deref()
-            .unwrap_or(req.fill.as_str());
+        let fill = node.style.fill.as_deref().unwrap_or(req.fill.as_str());
         let base_stroke = node
             .style
             .stroke
             .as_deref()
             .unwrap_or(req.box_stroke.as_str());
-        let base_stroke_width = node
-            .style
-            .stroke_width
-            .unwrap_or(req.box_stroke_width);
+        let base_stroke_width = node.style.stroke_width.unwrap_or(req.box_stroke_width);
         let label_color = node
             .style
             .text_color
@@ -1392,7 +1420,13 @@ fn render_requirement(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> 
         let header_x = node.x + req.label_padding_x;
         let header_y = node.y + req.label_padding_y;
         if header_count >= 1 {
-            svg.push_str(&render_line(header_x, header_y, &lines[0], label_color, false));
+            svg.push_str(&render_line(
+                header_x,
+                header_y,
+                &lines[0],
+                label_color,
+                false,
+            ));
         }
         if header_count >= 2 {
             let id_y = header_y + req.header_line_gap;
@@ -1479,11 +1513,8 @@ fn render_radar(layout: &Layout, theme: &Theme, _config: &LayoutConfig) -> Strin
         }
     }
 
-    let mut nodes: Vec<&crate::layout::NodeLayout> = layout
-        .nodes
-        .values()
-        .filter(|node| !node.hidden)
-        .collect();
+    let mut nodes: Vec<&crate::layout::NodeLayout> =
+        layout.nodes.values().filter(|node| !node.hidden).collect();
     nodes.sort_by_key(|node| radar_index(&node.id));
 
     let mut raw_series = Vec::new();
@@ -1650,7 +1681,9 @@ fn render_architecture(
     }
 
     fn first_line(text: &str) -> &str {
-        text.lines().find(|line| !line.trim().is_empty()).unwrap_or(text)
+        text.lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(text)
     }
 
     let default_marker_idx = color_ids.get(&theme.line_color).copied().unwrap_or(0);
@@ -1961,7 +1994,11 @@ fn render_quadrant(
     // Q1 top-right, Q2 top-left, Q3 bottom-left, Q4 bottom-right
     svg.push_str(&format!(
         "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
-        grid_x + half_w, grid_y, half_w, half_h, q_colors[0]
+        grid_x + half_w,
+        grid_y,
+        half_w,
+        half_h,
+        q_colors[0]
     ));
     svg.push_str(&format!(
         "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
@@ -1969,11 +2006,19 @@ fn render_quadrant(
     ));
     svg.push_str(&format!(
         "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
-        grid_x, grid_y + half_h, half_w, half_h, q_colors[2]
+        grid_x,
+        grid_y + half_h,
+        half_w,
+        half_h,
+        q_colors[2]
     ));
     svg.push_str(&format!(
         "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
-        grid_x + half_w, grid_y + half_h, half_w, half_h, q_colors[3]
+        grid_x + half_w,
+        grid_y + half_h,
+        half_w,
+        half_h,
+        q_colors[3]
     ));
 
     // Draw border
@@ -2014,7 +2059,15 @@ fn render_quadrant(
     for (i, label_opt) in layout.quadrant_labels.iter().enumerate() {
         if let Some(label) = label_opt {
             let (lx, ly) = label_positions[i];
-            svg.push_str(&text_block_svg(lx, ly, label, theme, config, false, Some("#131300")));
+            svg.push_str(&text_block_svg(
+                lx,
+                ly,
+                label,
+                theme,
+                config,
+                false,
+                Some("#131300"),
+            ));
         }
     }
 
@@ -2155,13 +2208,13 @@ fn render_xychart(
     config: &LayoutConfig,
 ) -> String {
     let mut svg = String::new();
-    
+
     // Background
     svg.push_str(&format!(
         "<rect x=\"0\" y=\"0\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
         layout.width, layout.height, theme.background
     ));
-    
+
     // Title
     if let Some(ref title) = layout.title {
         svg.push_str(&text_block_svg(
@@ -2174,13 +2227,13 @@ fn render_xychart(
             Some(theme.primary_text_color.as_str()),
         ));
     }
-    
+
     // Plot area border
     svg.push_str(&format!(
         "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\"/>",
         layout.plot_x, layout.plot_y, layout.plot_width, layout.plot_height, theme.line_color
     ));
-    
+
     // Y-axis ticks and labels
     for (label, y) in &layout.y_axis_ticks {
         // Tick line
@@ -2191,12 +2244,12 @@ fn render_xychart(
         // Label
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"end\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
-            layout.plot_x - 5.0, y + theme.font_size / 3.0, 
-            escape_xml(&theme.font_family), theme.font_size * 0.8, 
+            layout.plot_x - 5.0, y + theme.font_size / 3.0,
+            escape_xml(&theme.font_family), theme.font_size * 0.8,
             theme.primary_text_color, escape_xml(label)
         ));
     }
-    
+
     // X-axis categories
     for (label, x) in &layout.x_axis_categories {
         svg.push_str(&format!(
@@ -2206,7 +2259,7 @@ fn render_xychart(
             theme.primary_text_color, escape_xml(label)
         ));
     }
-    
+
     // Y-axis label
     if let Some(ref y_label) = layout.y_axis_label {
         svg.push_str(&format!(
@@ -2218,7 +2271,7 @@ fn render_xychart(
             escape_xml(&y_label.lines.join(" "))
         ));
     }
-    
+
     // Bars
     for bar in &layout.bars {
         svg.push_str(&format!(
@@ -2226,17 +2279,22 @@ fn render_xychart(
             bar.x, bar.y, bar.width, bar.height, escape_xml(&bar.color)
         ));
     }
-    
+
     // Lines
     for line in &layout.lines {
         if line.points.len() >= 2 {
-            let path: String = line.points.iter().enumerate().map(|(i, (x, y))| {
-                if i == 0 {
-                    format!("M {:.2},{:.2}", x, y)
-                } else {
-                    format!(" L {:.2},{:.2}", x, y)
-                }
-            }).collect();
+            let path: String = line
+                .points
+                .iter()
+                .enumerate()
+                .map(|(i, (x, y))| {
+                    if i == 0 {
+                        format!("M {:.2},{:.2}", x, y)
+                    } else {
+                        format!(" L {:.2},{:.2}", x, y)
+                    }
+                })
+                .collect();
             svg.push_str(&format!(
                 "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
                 path, escape_xml(&line.color)
@@ -2250,7 +2308,7 @@ fn render_xychart(
             }
         }
     }
-    
+
     svg
 }
 
@@ -2260,13 +2318,13 @@ fn render_timeline(
     config: &LayoutConfig,
 ) -> String {
     let mut svg = String::new();
-    
+
     // Background
     svg.push_str(&format!(
         "<rect x=\"0\" y=\"0\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\"/>",
         layout.width, layout.height, theme.background
     ));
-    
+
     // Title
     if let Some(ref title) = layout.title {
         svg.push_str(&text_block_svg(
@@ -2279,41 +2337,41 @@ fn render_timeline(
             Some(theme.primary_text_color.as_str()),
         ));
     }
-    
+
     // Main timeline line
     svg.push_str(&format!(
         "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"{}\" stroke-width=\"3\"/>",
         layout.line_start_x, layout.line_y, layout.line_end_x, layout.line_y, theme.primary_border_color
     ));
-    
+
     // Colors for events
     let colors = [
-        "#ECECFF", "#FFE6CC", "#D5E8D4", "#F8CECC", "#FFF2CC", "#E1D5E7"
+        "#ECECFF", "#FFE6CC", "#D5E8D4", "#F8CECC", "#FFF2CC", "#E1D5E7",
     ];
-    
+
     // Events
     for (i, event) in layout.events.iter().enumerate() {
         let color = colors[i % colors.len()];
         let center_x = event.x + event.width / 2.0;
-        
+
         // Circle on timeline
         svg.push_str(&format!(
             "<circle cx=\"{:.2}\" cy=\"{:.2}\" r=\"8\" fill=\"{}\" stroke=\"{}\" stroke-width=\"2\"/>",
             center_x, event.circle_y, theme.primary_color, theme.primary_border_color
         ));
-        
+
         // Vertical connector line
         svg.push_str(&format!(
             "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"{}\" stroke-width=\"2\" stroke-dasharray=\"4,2\"/>",
             center_x, event.circle_y + 8.0, center_x, event.y, theme.primary_border_color
         ));
-        
+
         // Event box
         svg.push_str(&format!(
             "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"5\" ry=\"5\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
             event.x, event.y, event.width, event.height, color, theme.primary_border_color
         ));
-        
+
         // Time label (bold, at top of box)
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" font-weight=\"bold\" fill=\"{}\">{}</text>",
@@ -2321,7 +2379,7 @@ fn render_timeline(
             escape_xml(&theme.font_family), theme.font_size,
             theme.primary_text_color, escape_xml(&event.time.lines.join(" "))
         ));
-        
+
         // Event descriptions
         let mut y_offset = 40.0;
         for evt in &event.events {
@@ -2334,7 +2392,7 @@ fn render_timeline(
             y_offset += theme.font_size * 1.2;
         }
     }
-    
+
     svg
 }
 
@@ -2346,7 +2404,9 @@ fn render_gitgraph(gitgraph: &GitGraphLayout, theme: &Theme, config: &LayoutConf
     if gg.show_branches {
         for branch in &gitgraph.branches {
             let (x1, y1, x2, y2) = match gitgraph.direction {
-                crate::ir::Direction::TopDown => (branch.pos, gg.default_pos, branch.pos, gitgraph.max_pos),
+                crate::ir::Direction::TopDown => {
+                    (branch.pos, gg.default_pos, branch.pos, gitgraph.max_pos)
+                }
                 crate::ir::Direction::BottomTop => {
                     (branch.pos, gitgraph.max_pos, branch.pos, gg.default_pos)
                 }
@@ -2782,14 +2842,8 @@ fn render_c4(c4: &C4Layout, config: &LayoutConfig) -> String {
 
 fn render_c4_shape(shape: &C4ShapeLayout, conf: &crate::config::C4Config) -> String {
     let (default_fill, default_stroke) = c4_shape_colors(conf, shape.kind);
-    let fill = shape
-        .bg_color
-        .as_deref()
-        .unwrap_or(default_fill);
-    let stroke = shape
-        .border_color
-        .as_deref()
-        .unwrap_or(default_stroke);
+    let fill = shape.bg_color.as_deref().unwrap_or(default_fill);
+    let stroke = shape.border_color.as_deref().unwrap_or(default_stroke);
     let font_color = shape.font_color.as_deref().unwrap_or("#FFFFFF");
     let fill = escape_xml(fill);
     let stroke = escape_xml(stroke);
@@ -2952,10 +3006,7 @@ fn render_c4_shape(shape: &C4ShapeLayout, conf: &crate::config::C4Config) -> Str
 fn render_c4_boundary(boundary: &C4BoundaryLayout, conf: &crate::config::C4Config) -> String {
     let mut svg = String::new();
     svg.push_str("<g>");
-    let fill = boundary
-        .bg_color
-        .as_deref()
-        .unwrap_or(&conf.boundary_fill);
+    let fill = boundary.bg_color.as_deref().unwrap_or(&conf.boundary_fill);
     let stroke = boundary
         .border_color
         .as_deref()
@@ -2980,10 +3031,16 @@ fn render_c4_boundary(boundary: &C4BoundaryLayout, conf: &crate::config::C4Confi
         conf.boundary_stroke_width
     );
     if !conf.boundary_dasharray.is_empty() {
-        rect_attrs.push_str(&format!(" stroke-dasharray=\"{}\"", escape_xml(&conf.boundary_dasharray)));
+        rect_attrs.push_str(&format!(
+            " stroke-dasharray=\"{}\"",
+            escape_xml(&conf.boundary_dasharray)
+        ));
     }
     if conf.boundary_fill != "none" && conf.boundary_fill_opacity < 1.0 {
-        rect_attrs.push_str(&format!(" fill-opacity=\"{:.2}\"", conf.boundary_fill_opacity));
+        rect_attrs.push_str(&format!(
+            " fill-opacity=\"{:.2}\"",
+            conf.boundary_fill_opacity
+        ));
     }
     rect_attrs.push_str("/>");
     svg.push_str(&rect_attrs);
@@ -3032,16 +3089,16 @@ fn render_c4_boundary(boundary: &C4BoundaryLayout, conf: &crate::config::C4Confi
 
 fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bool) -> String {
     let mut svg = String::new();
-    let stroke = rel
-        .line_color
-        .as_deref()
-        .unwrap_or(&conf.boundary_stroke);
+    let stroke = rel.line_color.as_deref().unwrap_or(&conf.boundary_stroke);
     if straight {
         let mut attrs = String::new();
         if rel.kind != crate::ir::C4RelKind::RelBack {
             attrs.push_str(" marker-end=\"url(#arrowhead)\"");
         }
-        if matches!(rel.kind, crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack) {
+        if matches!(
+            rel.kind,
+            crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack
+        ) {
             attrs.push_str(" marker-start=\"url(#arrowend)\"");
         }
         svg.push_str(&format!(
@@ -3068,17 +3125,17 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
         if rel.kind != crate::ir::C4RelKind::RelBack {
             path.push_str(" marker-end=\"url(#arrowhead)\"");
         }
-        if matches!(rel.kind, crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack) {
+        if matches!(
+            rel.kind,
+            crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack
+        ) {
             path.push_str(" marker-start=\"url(#arrowend)\"");
         }
         path.push_str("/>");
         svg.push_str(&path);
     }
 
-    let text_color = rel
-        .text_color
-        .as_deref()
-        .unwrap_or(&conf.boundary_stroke);
+    let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
     let mid_x = rel.start.0.min(rel.end.0) + (rel.start.0 - rel.end.0).abs() / 2.0 + rel.offset_x;
     let mid_y = rel.start.1.min(rel.end.1) + (rel.start.1 - rel.end.1).abs() / 2.0 + rel.offset_y;
     svg.push_str(&c4_text_svg(
@@ -3141,11 +3198,12 @@ fn c4_shape_colors(conf: &crate::config::C4Config, kind: crate::ir::C4ShapeKind)
             &conf.external_person_border_color,
         ),
         crate::ir::C4ShapeKind::System => (&conf.system_bg_color, &conf.system_border_color),
-        crate::ir::C4ShapeKind::SystemDb => (&conf.system_db_bg_color, &conf.system_db_border_color),
-        crate::ir::C4ShapeKind::SystemQueue => (
-            &conf.system_queue_bg_color,
-            &conf.system_queue_border_color,
-        ),
+        crate::ir::C4ShapeKind::SystemDb => {
+            (&conf.system_db_bg_color, &conf.system_db_border_color)
+        }
+        crate::ir::C4ShapeKind::SystemQueue => {
+            (&conf.system_queue_bg_color, &conf.system_queue_border_color)
+        }
         crate::ir::C4ShapeKind::ExternalSystem => (
             &conf.external_system_bg_color,
             &conf.external_system_border_color,
@@ -3158,11 +3216,12 @@ fn c4_shape_colors(conf: &crate::config::C4Config, kind: crate::ir::C4ShapeKind)
             &conf.external_system_queue_bg_color,
             &conf.external_system_queue_border_color,
         ),
-        crate::ir::C4ShapeKind::Container => (&conf.container_bg_color, &conf.container_border_color),
-        crate::ir::C4ShapeKind::ContainerDb => (
-            &conf.container_db_bg_color,
-            &conf.container_db_border_color,
-        ),
+        crate::ir::C4ShapeKind::Container => {
+            (&conf.container_bg_color, &conf.container_border_color)
+        }
+        crate::ir::C4ShapeKind::ContainerDb => {
+            (&conf.container_db_bg_color, &conf.container_db_border_color)
+        }
         crate::ir::C4ShapeKind::ContainerQueue => (
             &conf.container_queue_bg_color,
             &conf.container_queue_border_color,
@@ -3179,11 +3238,12 @@ fn c4_shape_colors(conf: &crate::config::C4Config, kind: crate::ir::C4ShapeKind)
             &conf.external_container_queue_bg_color,
             &conf.external_container_queue_border_color,
         ),
-        crate::ir::C4ShapeKind::Component => (&conf.component_bg_color, &conf.component_border_color),
-        crate::ir::C4ShapeKind::ComponentDb => (
-            &conf.component_db_bg_color,
-            &conf.component_db_border_color,
-        ),
+        crate::ir::C4ShapeKind::Component => {
+            (&conf.component_bg_color, &conf.component_border_color)
+        }
+        crate::ir::C4ShapeKind::ComponentDb => {
+            (&conf.component_db_bg_color, &conf.component_db_border_color)
+        }
         crate::ir::C4ShapeKind::ComponentQueue => (
             &conf.component_queue_bg_color,
             &conf.component_queue_border_color,
@@ -3218,13 +3278,17 @@ fn c4_shape_font_family(conf: &crate::config::C4Config, kind: crate::ir::C4Shape
         crate::ir::C4ShapeKind::ContainerQueue => &conf.container_queue_font_family,
         crate::ir::C4ShapeKind::ExternalContainer => &conf.external_container_font_family,
         crate::ir::C4ShapeKind::ExternalContainerDb => &conf.external_container_db_font_family,
-        crate::ir::C4ShapeKind::ExternalContainerQueue => &conf.external_container_queue_font_family,
+        crate::ir::C4ShapeKind::ExternalContainerQueue => {
+            &conf.external_container_queue_font_family
+        }
         crate::ir::C4ShapeKind::Component => &conf.component_font_family,
         crate::ir::C4ShapeKind::ComponentDb => &conf.component_db_font_family,
         crate::ir::C4ShapeKind::ComponentQueue => &conf.component_queue_font_family,
         crate::ir::C4ShapeKind::ExternalComponent => &conf.external_component_font_family,
         crate::ir::C4ShapeKind::ExternalComponentDb => &conf.external_component_db_font_family,
-        crate::ir::C4ShapeKind::ExternalComponentQueue => &conf.external_component_queue_font_family,
+        crate::ir::C4ShapeKind::ExternalComponentQueue => {
+            &conf.external_component_queue_font_family
+        }
     }
 }
 
@@ -3268,13 +3332,17 @@ fn c4_shape_font_weight(conf: &crate::config::C4Config, kind: crate::ir::C4Shape
         crate::ir::C4ShapeKind::ContainerQueue => &conf.container_queue_font_weight,
         crate::ir::C4ShapeKind::ExternalContainer => &conf.external_container_font_weight,
         crate::ir::C4ShapeKind::ExternalContainerDb => &conf.external_container_db_font_weight,
-        crate::ir::C4ShapeKind::ExternalContainerQueue => &conf.external_container_queue_font_weight,
+        crate::ir::C4ShapeKind::ExternalContainerQueue => {
+            &conf.external_container_queue_font_weight
+        }
         crate::ir::C4ShapeKind::Component => &conf.component_font_weight,
         crate::ir::C4ShapeKind::ComponentDb => &conf.component_db_font_weight,
         crate::ir::C4ShapeKind::ComponentQueue => &conf.component_queue_font_weight,
         crate::ir::C4ShapeKind::ExternalComponent => &conf.external_component_font_weight,
         crate::ir::C4ShapeKind::ExternalComponentDb => &conf.external_component_db_font_weight,
-        crate::ir::C4ShapeKind::ExternalComponentQueue => &conf.external_component_queue_font_weight,
+        crate::ir::C4ShapeKind::ExternalComponentQueue => {
+            &conf.external_component_queue_font_weight
+        }
     }
 }
 

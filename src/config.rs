@@ -33,18 +33,8 @@ const MINDMAP_SECTION_LINE_COLORS: [&str; 12] = [
 ];
 
 const MINDMAP_SECTION_LABEL_COLORS: [&str; 12] = [
-    "#ffffff",
-    "black",
-    "black",
-    "#ffffff",
-    "black",
-    "black",
-    "black",
-    "black",
-    "black",
-    "black",
-    "black",
-    "black",
+    "#ffffff", "black", "black", "#ffffff", "black", "black", "black", "black", "black", "black",
+    "black", "black",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -670,7 +660,7 @@ pub struct PieConfig {
 impl Default for PieConfig {
     fn default() -> Self {
         Self {
-            render_mode: PieRenderMode::Error,
+            render_mode: PieRenderMode::Chart,
             use_max_width: true,
             text_position: 0.75,
             height: 450.0,
@@ -1861,7 +1851,10 @@ pub fn load_config(path: Option<&Path>) -> anyhow::Result<Config> {
             config.layout.gitgraph.commit_label_rotate_translate_x_scale = v;
         }
         if let Some(v) = gg.commit_label_rotate_translate_x_width_offset {
-            config.layout.gitgraph.commit_label_rotate_translate_x_width_offset = v;
+            config
+                .layout
+                .gitgraph
+                .commit_label_rotate_translate_x_width_offset = v;
         }
         if let Some(v) = gg.commit_label_rotate_translate_y_base {
             config.layout.gitgraph.commit_label_rotate_translate_y_base = v;
@@ -2208,7 +2201,10 @@ pub fn load_config(path: Option<&Path>) -> anyhow::Result<Config> {
         if let Some(v) = c4.container_queue_font_weight {
             config.layout.c4.container_queue_font_weight = v.as_string();
         }
-        if let Some(v) = c4.external_container_queue_font_size.and_then(|v| v.as_f32()) {
+        if let Some(v) = c4
+            .external_container_queue_font_size
+            .and_then(|v| v.as_f32())
+        {
             config.layout.c4.external_container_queue_font_size = v;
         }
         if let Some(v) = c4.external_container_queue_font_family {
@@ -2262,7 +2258,10 @@ pub fn load_config(path: Option<&Path>) -> anyhow::Result<Config> {
         if let Some(v) = c4.component_queue_font_weight {
             config.layout.c4.component_queue_font_weight = v.as_string();
         }
-        if let Some(v) = c4.external_component_queue_font_size.and_then(|v| v.as_f32()) {
+        if let Some(v) = c4
+            .external_component_queue_font_size
+            .and_then(|v| v.as_f32())
+        {
             config.layout.c4.external_component_queue_font_size = v;
         }
         if let Some(v) = c4.external_component_queue_font_family {

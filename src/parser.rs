@@ -668,9 +668,7 @@ fn parse_state_alias_line(line: &str) -> Option<(String, String, Vec<String>)> {
     Some((id, label, classes))
 }
 
-fn parse_state_stereotype(
-    line: &str,
-) -> (String, Option<crate::ir::NodeShape>, Option<String>) {
+fn parse_state_stereotype(line: &str) -> (String, Option<crate::ir::NodeShape>, Option<String>) {
     let trimmed = line.trim();
     if !trimmed.starts_with("state ") {
         return (trimmed.to_string(), None, None);
@@ -724,10 +722,7 @@ fn parse_state_description_line(line: &str) -> Option<(String, String, Vec<Strin
     let mut idx = 0;
     while idx < bytes.len() {
         if bytes[idx] == b':' {
-            if idx + 2 < bytes.len()
-                && bytes[idx + 1] == b':'
-                && bytes[idx + 2] == b':'
-            {
+            if idx + 2 < bytes.len() && bytes[idx + 1] == b':' && bytes[idx + 2] == b':' {
                 idx += 3;
                 continue;
             }
@@ -752,9 +747,7 @@ fn parse_state_id_with_classes(input: &str) -> (String, Vec<String>) {
     (strip_quotes(base.trim()), classes)
 }
 
-fn parse_state_note(
-    line: &str,
-) -> Option<(crate::ir::StateNotePosition, String, String)> {
+fn parse_state_note(line: &str) -> Option<(crate::ir::StateNotePosition, String, String)> {
     let trimmed = line.trim();
     let lower = trimmed.to_ascii_lowercase();
     if !lower.starts_with("note ") {
@@ -984,7 +977,11 @@ fn parse_sequence_box_line(line: &str) -> Option<(Option<String>, Option<String>
     let first = tokens[0].clone();
     if first.eq_ignore_ascii_case("transparent") {
         let label = tokens[1..].join(" ");
-        let label = if label.trim().is_empty() { None } else { Some(label) };
+        let label = if label.trim().is_empty() {
+            None
+        } else {
+            Some(label)
+        };
         return Some((None, label));
     }
     let color = if tokens.len() > 1 {
@@ -1328,10 +1325,22 @@ fn split_er_cardinality_right(input: &str) -> (String, Option<String>) {
 fn normalize_er_cardinality(token: &str) -> (String, Option<crate::ir::EdgeDecoration>) {
     let trimmed = token.trim();
     match trimmed {
-        "||" | "|" => ("1".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootOne)),
-        "o|" | "|o" | "o" => ("0..1".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootZeroOne)),
-        "|{" | "}|" => ("1..*".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootMany)),
-        "o{" | "}o" | "}" | "{" => ("0..*".to_string(), Some(crate::ir::EdgeDecoration::CrowsFootZeroMany)),
+        "||" | "|" => (
+            "1".to_string(),
+            Some(crate::ir::EdgeDecoration::CrowsFootOne),
+        ),
+        "o|" | "|o" | "o" => (
+            "0..1".to_string(),
+            Some(crate::ir::EdgeDecoration::CrowsFootZeroOne),
+        ),
+        "|{" | "}|" => (
+            "1..*".to_string(),
+            Some(crate::ir::EdgeDecoration::CrowsFootMany),
+        ),
+        "o{" | "}o" | "}" | "{" => (
+            "0..*".to_string(),
+            Some(crate::ir::EdgeDecoration::CrowsFootZeroMany),
+        ),
         _ => (trimmed.to_string(), None),
     }
 }
@@ -1429,17 +1438,31 @@ fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
             if let Some(end_idx) = line.find('}') {
                 let fragment = line[..end_idx].trim();
                 if !fragment.is_empty() {
-                    members.entry(active.clone()).or_default().push(fragment.to_string());
+                    members
+                        .entry(active.clone())
+                        .or_default()
+                        .push(fragment.to_string());
                 }
                 current_entity = None;
             } else {
-                members.entry(active.clone()).or_default().push(line.to_string());
+                members
+                    .entry(active.clone())
+                    .or_default()
+                    .push(line.to_string());
             }
             continue;
         }
 
-        if let Some((left, right, label, _left_label, _right_label, left_decoration, right_decoration, style)) =
-            parse_er_relation_line(line)
+        if let Some((
+            left,
+            right,
+            label,
+            _left_label,
+            _right_label,
+            left_decoration,
+            right_decoration,
+            style,
+        )) = parse_er_relation_line(line)
         {
             graph.ensure_node(&left, None, Some(crate::ir::NodeShape::Rectangle));
             graph.ensure_node(&right, None, Some(crate::ir::NodeShape::Rectangle));
@@ -1700,7 +1723,12 @@ fn parse_mindmap_node_token(
     let (base, classes) = split_inline_classes(token);
     let trimmed = base.trim();
     if trimmed.is_empty() {
-        return (String::new(), String::new(), crate::ir::MindmapNodeType::Default, classes);
+        return (
+            String::new(),
+            String::new(),
+            crate::ir::MindmapNodeType::Default,
+            classes,
+        );
     }
 
     let mut id = String::new();
@@ -1729,9 +1757,7 @@ fn parse_mindmap_node_token(
     (id, label, node_type, classes)
 }
 
-fn parse_mindmap_shape(
-    raw: &str,
-) -> Option<(String, crate::ir::MindmapNodeType)> {
+fn parse_mindmap_shape(raw: &str) -> Option<(String, crate::ir::MindmapNodeType)> {
     let trimmed = raw.trim();
     if trimmed.starts_with("((") && trimmed.ends_with("))") {
         return Some((
@@ -1887,7 +1913,10 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
     let mut pending_time: Option<String> = None;
     let mut pending_events: Vec<String> = Vec::new();
 
-    let flush_pending = |graph: &mut Graph, pending_time: &mut Option<String>, pending_events: &mut Vec<String>, current_section: &Option<String>| {
+    let flush_pending = |graph: &mut Graph,
+                         pending_time: &mut Option<String>,
+                         pending_events: &mut Vec<String>,
+                         current_section: &Option<String>| {
         if let Some(time) = pending_time.take() {
             graph.timeline.events.push(crate::ir::TimelineEvent {
                 time,
@@ -1916,8 +1945,13 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
         }
         if lower.starts_with("section") {
             // Flush any pending event before starting new section
-            flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
-            
+            flush_pending(
+                &mut graph,
+                &mut pending_time,
+                &mut pending_events,
+                &current_section,
+            );
+
             let label = line.get(7..).unwrap_or("").trim();
             graph.timeline.sections.push(label.to_string());
             current_section = Some(label.to_string());
@@ -1928,12 +1962,17 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
         if let Some(colon_idx) = line.find(':') {
             let time_part = line[..colon_idx].trim();
             let events_part = line[colon_idx + 1..].trim();
-            
+
             if !time_part.is_empty() {
                 // New time entry - flush any previous
-                flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
+                flush_pending(
+                    &mut graph,
+                    &mut pending_time,
+                    &mut pending_events,
+                    &current_section,
+                );
                 pending_time = Some(time_part.to_string());
-                
+
                 // Parse events (can be multiple separated by :)
                 for event in events_part.split(':') {
                     let event = event.trim();
@@ -1944,9 +1983,14 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
             }
         }
     }
-    
+
     // Flush any remaining pending event
-    flush_pending(&mut graph, &mut pending_time, &mut pending_events, &current_section);
+    flush_pending(
+        &mut graph,
+        &mut pending_time,
+        &mut pending_events,
+        &current_section,
+    );
 
     Ok(ParseOutput { graph, init_config })
 }
@@ -2008,7 +2052,9 @@ fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
                 continue;
             }
             let (id, details, after) = parse_gantt_task_meta(meta);
-            let node_id = id.clone().unwrap_or_else(|| format!("gantt_{}", graph.nodes.len()));
+            let node_id = id
+                .clone()
+                .unwrap_or_else(|| format!("gantt_{}", graph.nodes.len()));
             let mut node_label = label.to_string();
             if !details.is_empty() {
                 node_label.push_str(&format!("\n{}", details.join(" | ")));
@@ -2218,11 +2264,17 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
             if let Some(end_idx) = line.find('}') {
                 let fragment = line[..end_idx].trim();
                 if !fragment.is_empty() {
-                    attributes.entry(active.clone()).or_default().push(fragment.to_string());
+                    attributes
+                        .entry(active.clone())
+                        .or_default()
+                        .push(fragment.to_string());
                 }
                 current_id = None;
             } else {
-                attributes.entry(active.clone()).or_default().push(line.to_string());
+                attributes
+                    .entry(active.clone())
+                    .or_default()
+                    .push(line.to_string());
             }
             continue;
         }
@@ -2314,19 +2366,11 @@ fn parse_requirement_relation_line(line: &str) -> Option<(String, String, String
     let (from_part, rel_part) = left.split_once('-')?;
     let from = from_part.trim();
     let rel = rel_part.trim().trim_matches('-').trim();
-    let rel_clean = rel
-        .trim_start_matches('<')
-        .trim_end_matches('>')
-        .trim();
+    let rel_clean = rel.trim_start_matches('<').trim_end_matches('>').trim();
     if from.is_empty() || rel_clean.is_empty() {
         return None;
     }
-    let rel_label = if rel.starts_with("<<") && rel.ends_with(">>") {
-        rel.to_string()
-    } else {
-        format!("<<{}>>", rel_clean)
-    };
-    Some((from.to_string(), rel_label, to.to_string()))
+    Some((from.to_string(), rel_clean.to_string(), to.to_string()))
 }
 
 fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
@@ -2600,7 +2644,11 @@ struct GitGraphIdRng {
 
 impl GitGraphIdRng {
     fn new(seed: u64) -> Self {
-        let seed = if seed == 0 { 0xA5A5_A5A5_5A5A_5A5A } else { seed };
+        let seed = if seed == 0 {
+            0xA5A5_A5A5_5A5A_5A5A
+        } else {
+            seed
+        };
         Self { state: seed }
     }
 
@@ -2724,11 +2772,9 @@ fn process_c4_line(line: &str, c4: &mut crate::ir::C4Data, boundary_stack: &mut 
             if let Some(value) = kv.get("type") {
                 boundary_type = Some(value.clone());
             }
-            let boundary_type = boundary_type.unwrap_or_else(|| c4_boundary_default_type(&func_lower));
-            let descr = kv
-                .get("descr")
-                .or_else(|| kv.get("description"))
-                .cloned();
+            let boundary_type =
+                boundary_type.unwrap_or_else(|| c4_boundary_default_type(&func_lower));
+            let descr = kv.get("descr").or_else(|| kv.get("description")).cloned();
             let sprite = kv.get("sprite").cloned();
             let tags = kv.get("tags").cloned();
             let link = kv.get("link").cloned();
@@ -2758,9 +2804,18 @@ fn process_c4_line(line: &str, c4: &mut crate::ir::C4Data, boundary_stack: &mut 
                 let from = rel_args[0].clone();
                 let to = rel_args[1].clone();
                 let label = rel_args[2].clone();
-                let techn = rel_args.get(3).cloned().or_else(|| kv.get("techn").cloned());
-                let descr = rel_args.get(4).cloned().or_else(|| kv.get("descr").cloned());
-                let sprite = rel_args.get(5).cloned().or_else(|| kv.get("sprite").cloned());
+                let techn = rel_args
+                    .get(3)
+                    .cloned()
+                    .or_else(|| kv.get("techn").cloned());
+                let descr = rel_args
+                    .get(4)
+                    .cloned()
+                    .or_else(|| kv.get("descr").cloned());
+                let sprite = rel_args
+                    .get(5)
+                    .cloned()
+                    .or_else(|| kv.get("sprite").cloned());
                 let tags = rel_args.get(6).cloned().or_else(|| kv.get("tags").cloned());
                 let link = rel_args.get(7).cloned().or_else(|| kv.get("link").cloned());
                 c4.rels.push(crate::ir::C4Rel {
@@ -2837,14 +2892,13 @@ fn process_c4_line(line: &str, c4: &mut crate::ir::C4Data, boundary_stack: &mut 
                 .get(0)
                 .cloned()
                 .or_else(|| get_c4_kv(&kv, "from"));
-            let to = positional
-                .get(1)
-                .cloned()
-                .or_else(|| get_c4_kv(&kv, "to"));
+            let to = positional.get(1).cloned().or_else(|| get_c4_kv(&kv, "to"));
             if let (Some(from), Some(to)) = (from, to) {
                 if let Some(rel) = c4.rels.iter_mut().find(|r| r.from == from && r.to == to) {
-                    let text_color = get_c4_kv(&kv, "textColor").or_else(|| positional.get(2).cloned());
-                    let line_color = get_c4_kv(&kv, "lineColor").or_else(|| positional.get(3).cloned());
+                    let text_color =
+                        get_c4_kv(&kv, "textColor").or_else(|| positional.get(2).cloned());
+                    let line_color =
+                        get_c4_kv(&kv, "lineColor").or_else(|| positional.get(3).cloned());
                     let offset_x = get_c4_kv(&kv, "offsetX").or_else(|| positional.get(4).cloned());
                     let offset_y = get_c4_kv(&kv, "offsetY").or_else(|| positional.get(5).cloned());
                     if let Some(val) = text_color {
@@ -2869,10 +2923,10 @@ fn process_c4_line(line: &str, c4: &mut crate::ir::C4Data, boundary_stack: &mut 
         }
 
         if func_lower == "updatelayoutconfig" || func_lower == "update_layout_config" {
-            let shape_in_row = get_c4_kv(&kv, "c4ShapeInRow")
-                .or_else(|| positional.get(0).cloned());
-            let boundary_in_row = get_c4_kv(&kv, "c4BoundaryInRow")
-                .or_else(|| positional.get(1).cloned());
+            let shape_in_row =
+                get_c4_kv(&kv, "c4ShapeInRow").or_else(|| positional.get(0).cloned());
+            let boundary_in_row =
+                get_c4_kv(&kv, "c4BoundaryInRow").or_else(|| positional.get(1).cloned());
             if let Some(val) = shape_in_row {
                 if let Ok(num) = val.trim().parse::<usize>() {
                     if num >= 1 {
@@ -3056,10 +3110,7 @@ fn normalize_c4_key(key: &str) -> String {
     out
 }
 
-fn get_c4_kv(
-    kv: &std::collections::HashMap<String, String>,
-    key: &str,
-) -> Option<String> {
+fn get_c4_kv(kv: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
     let target = normalize_c4_key(key);
     kv.iter()
         .find(|(k, _)| normalize_c4_key(k) == target)
@@ -3067,7 +3118,11 @@ fn get_c4_kv(
 }
 
 fn is_c4_boundary(func_lower: &str) -> bool {
-    func_lower.contains("boundary") || func_lower.starts_with("deployment_node") || func_lower == "node" || func_lower == "node_l" || func_lower == "node_r"
+    func_lower.contains("boundary")
+        || func_lower.starts_with("deployment_node")
+        || func_lower == "node"
+        || func_lower == "node_l"
+        || func_lower == "node_r"
 }
 
 fn c4_boundary_default_type(func_lower: &str) -> String {
@@ -3293,7 +3348,10 @@ fn parse_quadrant_diagram(input: &str) -> Result<ParseOutput> {
                 Some(label.clone()),
                 Some(crate::ir::NodeShape::Rectangle),
             );
-            graph.quadrant.points.push(crate::ir::QuadrantPoint { label, x, y });
+            graph
+                .quadrant
+                .points
+                .push(crate::ir::QuadrantPoint { label, x, y });
         }
     }
 
@@ -3306,13 +3364,14 @@ fn parse_quadrant_point_coords(line: &str) -> Option<(String, f32, f32)> {
     if label.is_empty() {
         return None;
     }
-    let coords = right.trim().trim_matches(|ch| ch == '[' || ch == ']' || ch == '(' || ch == ')');
+    let coords = right
+        .trim()
+        .trim_matches(|ch| ch == '[' || ch == ']' || ch == '(' || ch == ')');
     let mut parts = coords.split(',').map(|p| p.trim());
     let x: f32 = parts.next()?.parse().ok()?;
     let y: f32 = parts.next()?.parse().ok()?;
     Some((label, x, y))
 }
-
 
 fn parse_zenuml_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
@@ -3381,7 +3440,11 @@ fn parse_zenuml_message_line(
     }
     let (right, label) = if let Some((r, l)) = rest.split_once(':') {
         let lbl = l.trim();
-        let lbl = if lbl.is_empty() { None } else { Some(lbl.to_string()) };
+        let lbl = if lbl.is_empty() {
+            None
+        } else {
+            Some(lbl.to_string())
+        };
         (r.trim(), lbl)
     } else {
         (rest, None)
@@ -3580,11 +3643,7 @@ fn parse_kanban_diagram(input: &str) -> Result<ParseOutput> {
                 node_label.push_str(&format!("\n{}", meta));
             }
         }
-        graph.ensure_node(
-            &id,
-            Some(node_label),
-            Some(crate::ir::NodeShape::Rectangle),
-        );
+        graph.ensure_node(&id, Some(node_label), Some(crate::ir::NodeShape::Rectangle));
         if let Some(idx) = current_section {
             if let Some(subgraph) = graph.subgraphs.get_mut(idx) {
                 subgraph.nodes.push(id);
@@ -3676,11 +3735,7 @@ fn parse_architecture_node(line: &str) -> Option<(String, String, String, Option
     } else {
         String::new()
     };
-    let id_part = node_part
-        .split('[')
-        .next()
-        .unwrap_or(node_part)
-        .trim();
+    let id_part = node_part.split('[').next().unwrap_or(node_part).trim();
     let id = id_part
         .split('(')
         .next()
@@ -3859,7 +3914,14 @@ fn parse_treemap_item(line: &str) -> (String, Option<String>) {
         } else {
             Some(value.to_string())
         };
-        return (if label.is_empty() { left.trim().to_string() } else { label }, value);
+        return (
+            if label.is_empty() {
+                left.trim().to_string()
+            } else {
+                label
+            },
+            value,
+        );
     }
     (strip_quotes(line.trim()), None)
 }
@@ -3911,7 +3973,7 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
                     // Has range
                     let before_arrow = rest[..arrow_idx].trim();
                     let after_arrow = rest[arrow_idx + 3..].trim();
-                    
+
                     // Parse min value (might have label before it)
                     let min_str = before_arrow.split_whitespace().last().unwrap_or("0");
                     if let Ok(min) = min_str.parse::<f32>() {
@@ -3943,16 +4005,24 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
     Ok(ParseOutput { graph, init_config })
 }
 
-fn parse_xy_series_line_v2(line: &str) -> Option<(crate::ir::XYSeriesKind, Option<String>, Vec<f32>)> {
+fn parse_xy_series_line_v2(
+    line: &str,
+) -> Option<(crate::ir::XYSeriesKind, Option<String>, Vec<f32>)> {
     let lower = line.to_ascii_lowercase();
     let (kind, rest) = if lower.starts_with("bar") {
-        (crate::ir::XYSeriesKind::Bar, line.get(3..).unwrap_or("").trim())
+        (
+            crate::ir::XYSeriesKind::Bar,
+            line.get(3..).unwrap_or("").trim(),
+        )
     } else if lower.starts_with("line") {
-        (crate::ir::XYSeriesKind::Line, line.get(4..).unwrap_or("").trim())
+        (
+            crate::ir::XYSeriesKind::Line,
+            line.get(4..).unwrap_or("").trim(),
+        )
     } else {
         return None;
     };
-    
+
     // Parse optional label and values: [1, 2, 3] or "Label" [1, 2, 3]
     let (label, values_str) = if let Some(bracket_idx) = rest.find('[') {
         let label_part = rest[..bracket_idx].trim();
@@ -3965,13 +4035,13 @@ fn parse_xy_series_line_v2(line: &str) -> Option<(crate::ir::XYSeriesKind, Optio
     } else {
         (None, rest)
     };
-    
+
     let values: Vec<f32> = values_str
         .trim_matches(|ch| ch == '[' || ch == ']')
         .split(',')
         .filter_map(|s| s.trim().parse::<f32>().ok())
         .collect();
-    
+
     if values.is_empty() {
         None
     } else {
@@ -4530,11 +4600,13 @@ fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
                     order.push(id.clone());
                 }
                 ensure_sequence_node(&mut graph, &labels, &id, None);
-                graph.sequence_activations.push(crate::ir::SequenceActivation {
-                    participant: id,
-                    index: graph.edges.len(),
-                    kind: crate::ir::SequenceActivationKind::Activate,
-                });
+                graph
+                    .sequence_activations
+                    .push(crate::ir::SequenceActivation {
+                        participant: id,
+                        index: graph.edges.len(),
+                        kind: crate::ir::SequenceActivationKind::Activate,
+                    });
             }
             continue;
         }
@@ -4546,11 +4618,13 @@ fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
                     order.push(id.clone());
                 }
                 ensure_sequence_node(&mut graph, &labels, &id, None);
-                graph.sequence_activations.push(crate::ir::SequenceActivation {
-                    participant: id,
-                    index: graph.edges.len(),
-                    kind: crate::ir::SequenceActivationKind::Deactivate,
-                });
+                graph
+                    .sequence_activations
+                    .push(crate::ir::SequenceActivation {
+                        participant: id,
+                        index: graph.edges.len(),
+                        kind: crate::ir::SequenceActivationKind::Deactivate,
+                    });
             }
             continue;
         }
@@ -4938,9 +5012,7 @@ fn parse_edge_line(line: &str) -> Option<(String, Option<String>, String, EdgeMe
     let masked = mask_bracket_content(line);
 
     // Helper to extract from original line using match positions from masked line
-    let extract = |m: regex::Match| -> &str {
-        &line[m.start()..m.end()]
-    };
+    let extract = |m: regex::Match| -> &str { &line[m.start()..m.end()] };
 
     if let Some(caps) = PIPE_LABEL_RE.captures(&masked) {
         let left_match = caps.name("left")?;
@@ -5307,14 +5379,7 @@ fn parse_click_line(line: &str) -> Option<(String, crate::ir::NodeLink)> {
         }
     }
 
-    Some((
-        id,
-        crate::ir::NodeLink {
-            url,
-            title,
-            target,
-        },
-    ))
+    Some((id, crate::ir::NodeLink { url, title, target }))
 }
 
 fn parse_node_style(input: &str) -> crate::ir::NodeStyle {
@@ -5777,7 +5842,8 @@ mod tests {
 
     #[test]
     fn parse_er_diagram_basic() {
-        let input = "erDiagram\nCUSTOMER ||--o{ ORDER : places\nCUSTOMER {\nstring id\nstring name\n}";
+        let input =
+            "erDiagram\nCUSTOMER ||--o{ ORDER : places\nCUSTOMER {\nstring id\nstring name\n}";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::Er);
         assert_eq!(parsed.graph.edges.len(), 1);
@@ -5786,8 +5852,14 @@ mod tests {
         // ER diagrams use crow's foot decorations, not text labels
         assert_eq!(edge.start_label, None);
         assert_eq!(edge.end_label, None);
-        assert_eq!(edge.start_decoration, Some(crate::ir::EdgeDecoration::CrowsFootOne));
-        assert_eq!(edge.end_decoration, Some(crate::ir::EdgeDecoration::CrowsFootZeroMany));
+        assert_eq!(
+            edge.start_decoration,
+            Some(crate::ir::EdgeDecoration::CrowsFootOne)
+        );
+        assert_eq!(
+            edge.end_decoration,
+            Some(crate::ir::EdgeDecoration::CrowsFootZeroMany)
+        );
         let customer = parsed.graph.nodes.get("CUSTOMER").unwrap();
         assert!(customer.label.contains("CUSTOMER"));
         assert!(customer.label.contains("string id"));
@@ -5859,8 +5931,8 @@ mod tests {
         let input = "gitGraph\n  commit\n  branch feature\n  checkout feature\n  commit id:\"F1\"\n  checkout main\n  merge feature";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::GitGraph);
-        assert!(parsed.graph.nodes.len() >= 3);
-        assert!(parsed.graph.edges.len() >= 2);
+        assert!(parsed.graph.gitgraph.commits.len() >= 3);
+        assert!(parsed.graph.gitgraph.branches.len() >= 2);
     }
 
     #[test]
@@ -5868,9 +5940,9 @@ mod tests {
         let input = "C4Context\n  Person(admin, \"Admin\")\n  System(sys, \"System\")\n  Rel(admin, sys, \"Uses\")\n  Boundary(b0, \"Boundary\") { SystemDb(db, \"DB\") }";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::C4);
-        assert!(parsed.graph.nodes.len() >= 3);
-        assert_eq!(parsed.graph.edges.len(), 1);
-        assert_eq!(parsed.graph.subgraphs.len(), 1);
+        assert!(parsed.graph.c4.shapes.len() >= 3);
+        assert_eq!(parsed.graph.c4.rels.len(), 1);
+        assert!(parsed.graph.c4.boundaries.len() >= 2);
     }
 
     #[test]
@@ -5926,8 +5998,7 @@ mod tests {
 
     #[test]
     fn parse_architecture_basic() {
-        let input =
-            "architecture-beta\n  group api(icon)[API]\n  service web(icon)[Web] in api\n  service db(icon)[DB] in api\n  web:R --> L:db";
+        let input = "architecture-beta\n  group api(icon)[API]\n  service web(icon)[Web] in api\n  service db(icon)[DB] in api\n  web:R --> L:db";
         let parsed = parse_mermaid(input).unwrap();
         assert_eq!(parsed.graph.kind, DiagramKind::Architecture);
         assert_eq!(parsed.graph.subgraphs.len(), 1);
