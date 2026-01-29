@@ -388,9 +388,11 @@ pub fn remove_edge_label_proxies(g: &mut Graph<GraphConfig, GraphNode, GraphEdge
     let node = g.node(v).unwrap();
     if node.dummy.is_some() && node.dummy.clone().unwrap() == "edge-proxy" {
       let rank = node.rank.unwrap_or(0);
-      let graph_edge_ = g.edge_mut_with_obj(&node.e.clone().unwrap());
-      if let Some(graph_edge) = graph_edge_ {
-        graph_edge.label_rank = Some(rank);
+      if let Some(edge_ref) = node.e.clone() {
+        let graph_edge_ = g.edge_mut_with_obj(&edge_ref);
+        if let Some(graph_edge) = graph_edge_ {
+          graph_edge.label_rank = Some(rank);
+        }
       }
       g.remove_node(v);
     }

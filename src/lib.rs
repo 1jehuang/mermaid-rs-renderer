@@ -339,4 +339,55 @@ mod tests {
         assert!(svg.contains("Dogs"));
         assert!(!svg.contains("Syntax error in text"));
     }
+
+    // Regression tests for dagre_rust edge label proxy crash (unwrap on None)
+    // See: vendor/dagre_rust/src/layout/mod.rs remove_edge_label_proxies()
+
+    #[test]
+    fn test_flowchart_edge_labels() {
+        let svg = render(
+            r#"flowchart LR
+  A([Start]) --> B{Decision}
+  B -->|yes| C[/Do thing/]
+  B -->|no| D[\Skip\]
+  C --> E[[End]]
+  D --> E"#,
+        )
+        .unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn test_state_diagram_with_labels() {
+        let svg = render(
+            r#"stateDiagram-v2
+[*] --> Idle
+Idle --> Active : start
+state "Waiting" as Wait
+Wait --> Active"#,
+        )
+        .unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn test_er_diagram() {
+        let svg = render(
+            r#"erDiagram
+CUSTOMER ||--o{ ORDER : places
+CUSTOMER {
+string id
+string name
+}
+ORDER {
+string id
+date created_at
+}"#,
+        )
+        .unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("</svg>"));
+    }
 }
