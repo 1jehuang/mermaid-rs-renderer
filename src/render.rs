@@ -619,7 +619,7 @@ pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> Stri
                 let end = edge.points.last().copied().unwrap_or(start);
                 let mid_x = (start.0 + end.0) / 2.0;
                 let line_y = start.1;
-                let label_y = line_y - theme.font_size * 1.95;
+                let label_y = line_y - theme.font_size * 0.5;
                 let label_text = label.lines.join("\n");
                 svg.push_str(&text_line_svg(
                     mid_x,
