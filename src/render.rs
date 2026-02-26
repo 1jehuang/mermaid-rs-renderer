@@ -1986,17 +1986,26 @@ fn render_error(layout: &ErrorLayout, _theme: &Theme, _config: &LayoutConfig) ->
     svg
 }
 
-fn normalize_font_family_css(font_family: &str) -> String {
+/// Strips surrounding quotes from each comma-separated font name.
+///
+/// For example, `"Inter", "ui-sans-serif", sans-serif` becomes
+/// `Inter,ui-sans-serif,sans-serif`.
+///
+/// This is needed for both CSS `<style>` blocks and SVG XML attributes
+/// (`font-family="..."`). Without stripping, SVG renderers like usvg treat
+/// the entire quoted string as a single font name and fail to resolve any
+/// of the individual fonts, causing text to disappear.
+fn normalize_font_family(font_family: &str) -> String {
     font_family
         .split(',')
         .map(|part| part.trim().trim_matches('\'').trim_matches('"'))
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
-        .join(",")
+        .join(", ")
 }
 
 fn error_style_block(theme: &Theme) -> String {
-    let font_family = normalize_font_family_css(&theme.font_family);
+    let font_family = normalize_font_family(&theme.font_family);
     format!(
         "<style>svg{{font-family:{font_family};font-size:{font_size};fill:{fill};}}.error-icon{{fill:#552222;}}.error-text{{fill:#552222;stroke:#552222;}}</style>",
         font_family = font_family,
@@ -2008,7 +2017,7 @@ fn error_style_block(theme: &Theme) -> String {
 fn render_requirement(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> String {
     let mut svg = String::new();
     let req = &config.requirement;
-    let font_family = escape_xml(&theme.font_family);
+    let font_family = normalize_font_family(&theme.font_family);
     let measure_font_size = theme.font_size.max(16.0);
     let line_height = measure_font_size * config.label_line_height;
 
@@ -2340,7 +2349,7 @@ fn render_radar(layout: &Layout, theme: &Theme, _config: &LayoutConfig) -> Strin
             lx,
             ly,
             anchor,
-            escape_xml(&theme.font_family),
+            normalize_font_family(&theme.font_family),
             AXIS_COLOR,
             escape_xml(axis)
         ));
@@ -2387,7 +2396,7 @@ fn render_radar(layout: &Layout, theme: &Theme, _config: &LayoutConfig) -> Strin
             "<text x=\"{:.3}\" y=\"{:.3}\" text-anchor=\"start\" dominant-baseline=\"hanging\" font-family=\"{}\" font-size=\"12\" fill=\"{}\">{}</text>",
             legend_x + LEGEND_BOX_SIZE + LEGEND_GAP,
             legend_y,
-            escape_xml(&theme.font_family),
+            normalize_font_family(&theme.font_family),
             AXIS_COLOR,
             escape_xml(name)
         ));
@@ -2396,7 +2405,7 @@ fn render_radar(layout: &Layout, theme: &Theme, _config: &LayoutConfig) -> Strin
     svg.push_str(&format!(
         "<text x=\"0\" y=\"{:.3}\" text-anchor=\"middle\" dominant-baseline=\"hanging\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\"></text>",
         -(MAX_RADIUS + 50.0),
-        escape_xml(&theme.font_family),
+        normalize_font_family(&theme.font_family),
         theme.font_size,
         AXIS_COLOR
     ));
@@ -2610,7 +2619,7 @@ fn render_architecture(
             "<text x=\"{:.3}\" y=\"{:.3}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
             node.width / 2.0,
             label_y,
-            escape_xml(&theme.font_family),
+            normalize_font_family(&theme.font_family),
             theme.font_size,
             escape_xml(&theme.primary_text_color),
             escape_xml(&label_text)
@@ -2664,7 +2673,7 @@ fn render_architecture(
             "<text x=\"{:.3}\" y=\"{:.3}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
             label_x,
             label_y,
-            escape_xml(&theme.font_family),
+            normalize_font_family(&theme.font_family),
             theme.font_size,
             escape_xml(&theme.primary_text_color),
             escape_xml(first_line(&subgraph.label))
@@ -2906,7 +2915,7 @@ fn render_pie(pie: &PieData, theme: &Theme, config: &LayoutConfig) -> String {
             label_x,
             label.y,
             anchor,
-            theme.font_family,
+            normalize_font_family(&theme.font_family),
             label.font_size,
             escape_xml(&theme.pie_section_text_color),
             label.text
@@ -3101,7 +3110,7 @@ fn render_quadrant(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"end\" dominant-baseline=\"middle\" font-family=\"{}\" font-size=\"{}\" fill=\"#131300\"><tspan>{}</tspan></text>",
             axis_x,
             axis_y,
-            theme.font_family,
+            normalize_font_family(&theme.font_family),
             theme.font_size,
             y_bottom.lines.first().map(|s| s.as_str()).unwrap_or("")
         ));
@@ -3113,7 +3122,7 @@ fn render_quadrant(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"end\" dominant-baseline=\"middle\" font-family=\"{}\" font-size=\"{}\" fill=\"#131300\"><tspan>{}</tspan></text>",
             axis_x,
             axis_y,
-            theme.font_family,
+            normalize_font_family(&theme.font_family),
             theme.font_size,
             y_top.lines.first().map(|s| s.as_str()).unwrap_or("")
         ));
@@ -3333,7 +3342,7 @@ fn render_gantt(
                         "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" dominant-baseline=\"middle\" font-family=\"{}\" font-size=\"{:.2}\" fill=\"{}\">{}</text>",
                         text_x,
                         text_y,
-                        escape_xml(&theme.font_family),
+                        normalize_font_family(&theme.font_family),
                         font_size,
                         escape_xml(&gantt_label_color(&task.color)),
                         escape_xml(label_text)
@@ -3404,7 +3413,7 @@ fn render_xychart(
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"end\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
             layout.plot_x - 5.0, y + theme.font_size / 3.0,
-            escape_xml(&theme.font_family), theme.font_size * 0.8,
+            normalize_font_family(&theme.font_family), theme.font_size * 0.8,
             theme.primary_text_color, escape_xml(label)
         ));
     }
@@ -3414,7 +3423,7 @@ fn render_xychart(
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
             x, layout.plot_y + layout.plot_height + 20.0,
-            escape_xml(&theme.font_family), theme.font_size * 0.9,
+            normalize_font_family(&theme.font_family), theme.font_size * 0.9,
             theme.primary_text_color, escape_xml(label)
         ));
     }
@@ -3424,7 +3433,7 @@ fn render_xychart(
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\" transform=\"rotate(-90, {:.2}, {:.2})\">{}</text>",
             layout.y_axis_label_x, layout.plot_y + layout.plot_height / 2.0,
-            escape_xml(&theme.font_family), theme.font_size,
+            normalize_font_family(&theme.font_family), theme.font_size,
             theme.primary_text_color,
             layout.y_axis_label_x, layout.plot_y + layout.plot_height / 2.0,
             escape_xml(&y_label.lines.join(" "))
@@ -3535,7 +3544,7 @@ fn render_timeline(
         svg.push_str(&format!(
             "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" font-weight=\"bold\" fill=\"{}\">{}</text>",
             center_x, event.y + 20.0,
-            escape_xml(&theme.font_family), theme.font_size,
+            normalize_font_family(&theme.font_family), theme.font_size,
             theme.primary_text_color, escape_xml(&event.time.lines.join(" "))
         ));
 
@@ -3545,7 +3554,7 @@ fn render_timeline(
             svg.push_str(&format!(
                 "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.1}\" fill=\"{}\">{}</text>",
                 center_x, event.y + y_offset,
-                escape_xml(&theme.font_family), theme.font_size * 0.9,
+                normalize_font_family(&theme.font_family), theme.font_size * 0.9,
                 theme.primary_text_color, escape_xml(&evt.lines.join(" "))
             ));
             y_offset += theme.font_size * 1.2;
@@ -3913,7 +3922,7 @@ fn render_gitgraph(gitgraph: &GitGraphLayout, theme: &Theme, config: &LayoutConf
                 "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
                 label.text_x,
                 label.text_y,
-                theme.font_family,
+                normalize_font_family(&theme.font_family),
                 gg.commit_label_font_size,
                 escape_xml(&theme.git_commit_label_color),
                 escape_xml(&label.text)
@@ -3959,7 +3968,7 @@ fn render_gitgraph(gitgraph: &GitGraphLayout, theme: &Theme, config: &LayoutConf
                     "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
                     tag.text_x,
                     tag.text_y,
-                    theme.font_family,
+                    normalize_font_family(&theme.font_family),
                     gg.tag_label_font_size,
                     escape_xml(&theme.git_tag_label_color),
                     escape_xml(&tag.text)
@@ -4003,7 +4012,7 @@ fn render_gitgraph_multiline_text(
     let mut out = String::new();
     out.push_str(&format!(
         "<text x=\"{x:.2}\" y=\"{start_y:.2}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">",
-        escape_xml(font_family),
+        normalize_font_family(font_family),
         font_size,
         escape_xml(color)
     ));
@@ -4086,7 +4095,7 @@ fn text_block_svg_with_font_size(
 
     text.push_str(&format!(
         "<text x=\"{x:.2}\" y=\"{start_y:.2}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">",
-        theme.font_family,
+        normalize_font_family(&theme.font_family),
         font_size,
         fill
     ));
@@ -4137,7 +4146,7 @@ fn text_block_svg_with_font_size_weight(
 
     text.push_str(&format!(
         "<text x=\"{x:.2}\" y=\"{start_y:.2}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\"{weight_attr}>",
-        theme.font_family,
+        normalize_font_family(&theme.font_family),
         font_size,
         fill
     ));
@@ -4171,7 +4180,7 @@ fn text_line_svg_with_font_size(
 ) -> String {
     format!(
         "<text x=\"{x:.2}\" y=\"{y:.2}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
-        theme.font_family,
+        normalize_font_family(&theme.font_family),
         font_size,
         fill,
         escape_xml(text)
@@ -4181,7 +4190,7 @@ fn text_line_svg_with_font_size(
 fn text_line_svg(x: f32, y: f32, text: &str, theme: &Theme, fill: &str, anchor: &str) -> String {
     format!(
         "<text x=\"{x:.2}\" y=\"{y:.2}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
-        theme.font_family,
+        normalize_font_family(&theme.font_family),
         theme.font_size,
         fill,
         escape_xml(text)
@@ -4305,7 +4314,7 @@ fn render_c4_shape(shape: &C4ShapeLayout, conf: &crate::config::C4Config) -> Str
     svg.push_str(&format!(
         "<text fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-style=\"italic\" lengthAdjust=\"spacing\" textLength=\"{:.0}\" x=\"{:.0}\" y=\"{:.0}\">{}</text>",
         font_color,
-        escape_xml(type_font_family),
+        normalize_font_family(type_font_family),
         type_font_size,
         shape.type_label.width.round(),
         shape.x + shape.width / 2.0 - shape.type_label.width / 2.0,
@@ -4563,7 +4572,7 @@ fn c4_text_svg(
             escape_xml(fill),
             font_size,
             escape_xml(font_weight),
-            escape_xml(font_family),
+            normalize_font_family(font_family),
             if italic { " font-style=\"italic\"" } else { "" },
             escape_xml(line)
         ));
@@ -4939,7 +4948,7 @@ fn render_er_node_label(
                     "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\" fill-opacity=\"0.75\">{}</text>",
                     left_x,
                     y,
-                    theme.font_family,
+                    normalize_font_family(&theme.font_family),
                     theme.font_size,
                     fill,
                     escape_xml(&ty)
@@ -4948,7 +4957,7 @@ fn render_er_node_label(
                     "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"start\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
                     name_x,
                     y,
-                    theme.font_family,
+                    normalize_font_family(&theme.font_family),
                     theme.font_size,
                     fill,
                     escape_xml(&name)
@@ -4988,7 +4997,7 @@ fn text_lines_svg(
     let mut text = String::new();
     text.push_str(&format!(
         "<text x=\"{x:.2}\" y=\"{first_y:.2}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">",
-        theme.font_family,
+        normalize_font_family(&theme.font_family),
         theme.font_size,
         fill
     ));
@@ -5144,7 +5153,7 @@ fn er_badge_svg(
         "<text x=\"{:.2}\" y=\"{:.2}\" text-anchor=\"middle\" font-family=\"{}\" font-size=\"{:.2}\" font-weight=\"600\" fill=\"{}\">{}</text>",
         x + width / 2.0,
         y + font_size * 0.26,
-        font_family,
+        normalize_font_family(font_family),
         font_size * 0.72,
         text_color,
         escape_xml(text)
