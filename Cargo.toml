@@ -31,7 +31,7 @@ png = ["dep:resvg", "dep:usvg"]
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"], optional = true }
-regex = "1.10"
+regex = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 json5 = "1.3"
