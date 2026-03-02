@@ -647,6 +647,11 @@ fn normalize_class_id(token: &str) -> (String, Option<String>) {
     (trimmed.to_string(), None)
 }
 
+fn is_class_stereotype(entry: &str) -> bool {
+    let trimmed = entry.trim();
+    trimmed.starts_with("<<") && trimmed.ends_with(">>") && trimmed.len() > 4
+}
+
 fn parse_state_alias_line(line: &str) -> Option<(String, String, Vec<String>)> {
     let trimmed = line.trim();
     if !trimmed.starts_with("state ") {
@@ -1131,6 +1136,7 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
     let (lines, init_config) = preprocess_input(input)?;
 
     let mut members: HashMap<String, Vec<String>> = HashMap::new();
+    let mut stereotypes: HashMap<String, Vec<String>> = HashMap::new();
     let mut labels: HashMap<String, String> = HashMap::new();
     let mut current_class: Option<String> = None;
 
@@ -1159,12 +1165,24 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
             if let Some(end_idx) = line.find('}') {
                 let fragment = line[..end_idx].trim();
                 if !fragment.is_empty() {
-                    members
-                        .entry(active.clone())
-                        .or_default()
-                        .push(fragment.to_string());
+                    if is_class_stereotype(fragment) {
+                        stereotypes
+                            .entry(active.clone())
+                            .or_default()
+                            .push(fragment.to_string());
+                    } else {
+                        members
+                            .entry(active.clone())
+                            .or_default()
+                            .push(fragment.to_string());
+                    }
                 }
                 current_class = None;
+            } else if is_class_stereotype(line.trim()) {
+                stereotypes
+                    .entry(active.clone())
+                    .or_default()
+                    .push(line.trim().to_string());
             } else {
                 members
                     .entry(active.clone())
@@ -1227,7 +1245,11 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
                 if let Some(body) = body {
                     for entry in split_class_body(&body) {
                         if !entry.is_empty() {
-                            members.entry(id.clone()).or_default().push(entry);
+                            if is_class_stereotype(&entry) {
+                                stereotypes.entry(id.clone()).or_default().push(entry);
+                            } else {
+                                members.entry(id.clone()).or_default().push(entry);
+                            }
                         }
                     }
                 }
@@ -1239,7 +1261,11 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
         }
 
         if let Some((id, member)) = parse_class_member_line(line) {
-            members.entry(id).or_default().push(member);
+            if is_class_stereotype(&member) {
+                stereotypes.entry(id).or_default().push(member);
+            } else {
+                members.entry(id).or_default().push(member);
+            }
             continue;
         }
     }
@@ -1250,6 +1276,9 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
             .cloned()
             .unwrap_or_else(|| node.label.clone());
         let mut lines = Vec::new();
+        if let Some(st) = stereotypes.get(id) {
+            lines.extend(st.iter().cloned());
+        }
         lines.push(class_name.clone());
         if let Some(items) = members.get(id)
             && !items.is_empty()
@@ -1264,15 +1293,17 @@ fn parse_class_diagram(input: &str) -> Result<ParseOutput> {
                     attrs.push(trimmed.to_string());
                 }
             }
-            lines.push("---".to_string());
-            if !attrs.is_empty() {
-                lines.extend(attrs);
-                if !methods.is_empty() {
-                    lines.push("---".to_string());
+            if !attrs.is_empty() || !methods.is_empty() {
+                lines.push("---".to_string());
+                if !attrs.is_empty() {
+                    lines.extend(attrs);
+                    if !methods.is_empty() {
+                        lines.push("---".to_string());
+                        lines.extend(methods);
+                    }
+                } else {
                     lines.extend(methods);
                 }
-            } else {
-                lines.extend(methods);
             }
         }
         node.label = lines.join("\n");
@@ -6149,6 +6180,56 @@ A["foo & bar"] & B --> C"#;
         assert_eq!(edge.start_label.as_deref(), Some("1"));
         assert_eq!(edge.end_label.as_deref(), Some("many"));
         assert_eq!(edge.label.as_deref(), Some("contains"));
+    }
+
+    #[test]
+    fn parse_class_stereotype_annotation() {
+        let input = "classDiagram\nclass A {\n<<interface>>\n+doSomething()\n}";
+        let parsed = parse_mermaid(input).unwrap();
+        let label = &parsed.graph.nodes.get("A").unwrap().label;
+        let lines: Vec<&str> = label.lines().collect();
+        assert_eq!(lines[0], "<<interface>>");
+        assert_eq!(lines[1], "A");
+        assert_eq!(lines[2], "---");
+        assert!(lines[3].contains("doSomething"));
+    }
+
+    #[test]
+    fn parse_class_stereotype_only() {
+        let input = "classDiagram\nclass B {\n<<abstract>>\n}";
+        let parsed = parse_mermaid(input).unwrap();
+        let label = &parsed.graph.nodes.get("B").unwrap().label;
+        let lines: Vec<&str> = label.lines().collect();
+        assert_eq!(lines[0], "<<abstract>>");
+        assert_eq!(lines[1], "B");
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn parse_class_stereotype_with_attrs_and_methods() {
+        let input = "classDiagram\nclass C {\n<<service>>\n+String name\n+getName()\n}";
+        let parsed = parse_mermaid(input).unwrap();
+        let label = &parsed.graph.nodes.get("C").unwrap().label;
+        let lines: Vec<&str> = label.lines().collect();
+        assert_eq!(lines[0], "<<service>>");
+        assert_eq!(lines[1], "C");
+        assert_eq!(lines[2], "---");
+        assert!(lines[3].contains("name"));
+        assert_eq!(lines[4], "---");
+        assert!(lines[5].contains("getName"));
+    }
+
+    #[test]
+    fn parse_class_multiple_stereotypes() {
+        let input = "classDiagram\nclass D {\n<<service>>\n<<singleton>>\n+getUser()\n}";
+        let parsed = parse_mermaid(input).unwrap();
+        let label = &parsed.graph.nodes.get("D").unwrap().label;
+        let lines: Vec<&str> = label.lines().collect();
+        assert_eq!(lines[0], "<<service>>");
+        assert_eq!(lines[1], "<<singleton>>");
+        assert_eq!(lines[2], "D");
+        assert_eq!(lines[3], "---");
+        assert!(lines[4].contains("getUser"));
     }
 
     #[test]
