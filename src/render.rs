@@ -5446,6 +5446,9 @@ fn escape_xml(input: &str) -> String {
 fn parse_hex_color(input: &str) -> Option<resvg::tiny_skia::Color> {
     let color = input.trim();
     let hex = color.strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
     let (r, g, b, a) = match hex.len() {
         3 => {
             let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
@@ -6104,5 +6107,36 @@ mod tests {
             &points,
             near
         ));
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn parse_hex_color_rejects_multibyte_utf8() {
+        // 3-byte char
+        assert_eq!(parse_hex_color("#\u{1000}"), None);
+        // 2-byte char inside a 6-byte string
+        assert_eq!(parse_hex_color("#a\u{00FF}bcd"), None);
+        // 2-byte char inside an 8-byte string
+        assert_eq!(parse_hex_color("#abcde\u{0100}f"), None);
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn parse_hex_color_valid_colors() {
+        let c = parse_hex_color("#fff").unwrap();
+        assert_eq!(c.red(), 1.0);
+        assert_eq!(c.green(), 1.0);
+        assert_eq!(c.blue(), 1.0);
+
+        let c = parse_hex_color("#ff0000").unwrap();
+        assert_eq!(c.red(), 1.0);
+        assert_eq!(c.green(), 0.0);
+        assert_eq!(c.blue(), 0.0);
+
+        let c = parse_hex_color("#00ff0080").unwrap();
+        assert_eq!(c.red(), 0.0);
+        assert_eq!(c.green(), 1.0);
+        assert_eq!(c.blue(), 0.0);
+        assert_eq!(c.alpha(), 128.0 / 255.0);
     }
 }

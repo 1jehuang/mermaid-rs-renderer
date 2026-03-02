@@ -240,6 +240,9 @@ fn parse_hsl(value: &str) -> Option<(f32, f32, f32)> {
 
 fn parse_hex(value: &str) -> Option<(f32, f32, f32)> {
     let hex = value.strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
     let digits = match hex.len() {
         3 => {
             let mut expanded = String::new();
@@ -284,4 +287,26 @@ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
         }
     }
     (h, s * 100.0, l * 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_rejects_multibyte_utf8() {
+        // 3-byte char
+        assert_eq!(parse_hex("#\u{1000}"), None);
+        // 2-byte char inside a 6-byte string
+        assert_eq!(parse_hex("#a\u{00FF}bcd"), None);
+        // 2-byte char inside an 8-byte string
+        assert_eq!(parse_hex("#abcde\u{0100}f"), None);
+    }
+
+    #[test]
+    fn parse_hex_valid_colors() {
+        assert_eq!(parse_hex("#fff"), Some((1.0, 1.0, 1.0)));
+        assert_eq!(parse_hex("#ff0000"), Some((1.0, 0.0, 0.0)));
+        assert_eq!(parse_hex("#00ff0080"), Some((0.0, 1.0, 0.0)));
+    }
 }
