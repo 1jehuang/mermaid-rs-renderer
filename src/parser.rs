@@ -84,9 +84,17 @@ pub fn parse_mermaid(input: &str) -> Result<ParseOutput> {
 }
 
 fn detect_diagram_kind(input: &str) -> DiagramKind {
+    let mut in_frontmatter = false;
     for raw_line in input.lines() {
         let trimmed_line = raw_line.trim();
         if trimmed_line.is_empty() {
+            continue;
+        }
+        if trimmed_line == "---" {
+            in_frontmatter = !in_frontmatter;
+            continue;
+        }
+        if in_frontmatter {
             continue;
         }
         if trimmed_line.starts_with("%%") {
@@ -176,10 +184,18 @@ fn detect_diagram_kind(input: &str) -> DiagramKind {
 fn preprocess_input(input: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
     let mut init_config: Option<serde_json::Value> = None;
     let mut lines = Vec::new();
+    let mut in_frontmatter = false;
 
     for raw_line in input.lines() {
         let trimmed_line = raw_line.trim();
         if trimmed_line.is_empty() {
+            continue;
+        }
+        if trimmed_line == "---" {
+            in_frontmatter = !in_frontmatter;
+            continue;
+        }
+        if in_frontmatter {
             continue;
         }
         if let Some(caps) = INIT_RE.captures(trimmed_line) {
@@ -2004,11 +2020,38 @@ fn parse_timeline_diagram(input: &str) -> Result<ParseOutput> {
     Ok(ParseOutput { graph, init_config })
 }
 
+fn extract_frontmatter_value(input: &str, key: &str) -> Option<String> {
+    let mut in_frontmatter = false;
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            if in_frontmatter {
+                return None;
+            }
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter {
+            if let Some((k, v)) = trimmed.split_once(':') {
+                if k.trim() == key {
+                    let val = v.trim().to_string();
+                    if !val.is_empty() {
+                        return Some(val);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn parse_gantt_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::Gantt;
     graph.direction = Direction::LeftRight;
     let (lines, init_config) = preprocess_input(input)?;
+
+    graph.gantt_display_mode = extract_frontmatter_value(input, "displayMode");
 
     let mut current_section: Option<usize> = None;
     let mut current_section_name: Option<String> = None;
@@ -6231,6 +6274,22 @@ A["foo & bar"] & B --> C"#;
         assert_eq!(parsed.graph.kind, DiagramKind::Gantt);
         assert!(parsed.graph.nodes.len() >= 2);
         assert_eq!(parsed.graph.edges.len(), 1);
+    }
+
+    #[test]
+    fn parse_gantt_frontmatter_display_mode() {
+        let input = "---\ndisplayMode: compact\n---\ngantt\n  title Plan\n  section Alpha\n  Task A : a1, 2020-01-01, 5d";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.kind, DiagramKind::Gantt);
+        assert_eq!(parsed.graph.gantt_display_mode.as_deref(), Some("compact"),);
+        assert!(
+            !parsed
+                .graph
+                .gantt_tasks
+                .iter()
+                .any(|t| t.label.contains("displayMode")),
+            "displayMode should not appear as a task"
+        );
     }
 
     #[test]

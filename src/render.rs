@@ -3344,14 +3344,27 @@ fn render_gantt(
         }
         // Task label
         if !label_rendered_inside {
+            // In compact mode, place next to the element to avoid
+            // overlapping labels when multiple tasks share a row.
+            let (label_x, anchor) = if layout.compact {
+                let gap = theme.font_size * 0.4;
+                if matches!(task.status, Some(crate::ir::GanttStatus::Milestone)) {
+                    let size = bar_height * 0.6;
+                    (task.x + size + gap, "start")
+                } else {
+                    (task.x + task.width + gap, "start")
+                }
+            } else {
+                (layout.task_label_x, "start")
+            };
             svg.push_str(&text_block_svg_with_font_size(
-                layout.task_label_x,
+                label_x,
                 row_center,
                 &task.label,
                 theme,
                 config,
                 task_font,
-                "start",
+                anchor,
                 Some(theme.primary_text_color.as_str()),
                 false,
             ));

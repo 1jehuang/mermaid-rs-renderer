@@ -255,6 +255,12 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
         ticks.push(GanttTick { x, label });
     }
 
+    let compact = graph
+        .gantt_display_mode
+        .as_deref()
+        .map(|m| m.eq_ignore_ascii_case("compact"))
+        .unwrap_or(false);
+
     let palette = gantt_palette(theme);
     let section_palette = gantt_section_palette(theme, &graph.gantt_sections);
     let mut current_section: Option<String> = None;
@@ -263,6 +269,10 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
     let mut tasks: Vec<GanttTaskLayout> = Vec::new();
     let mut y = chart_y;
 
+    // Compact mode: pack non-overlapping tasks into the same row.
+    // Each lane is y_position, end_time
+    let mut lanes: Vec<(f32, f32)> = Vec::new();
+
     for (idx, (label, start, duration, status, section)) in computed.iter().enumerate() {
         if section != &current_section {
             if let Some(sec) = section.as_ref() {
@@ -270,6 +280,7 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
                     let height = (y - sections[prev_idx].y).max(row_height);
                     sections[prev_idx].height = height;
                 }
+                lanes.clear();
                 let base_color = section_palette
                     .get(sec)
                     .cloned()
@@ -287,6 +298,7 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
                 let height = (y - sections[prev_idx].y).max(row_height);
                 sections[prev_idx].height = height;
                 current_section_idx = None;
+                lanes.clear();
             }
             current_section = section.clone();
         }
@@ -307,10 +319,28 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
         };
         let color = gantt_task_color(*status, &base_color, &palette[0]);
 
+        let task_end = start + duration;
+        let task_y = if compact {
+            if let Some(lane) = lanes.iter_mut().find(|(_, end)| *start >= *end) {
+                let ly = lane.0;
+                lane.1 = task_end;
+                ly
+            } else {
+                let ly = y;
+                lanes.push((ly, task_end));
+                y += row_height;
+                ly
+            }
+        } else {
+            let ly = y;
+            y += row_height;
+            ly
+        };
+
         tasks.push(GanttTaskLayout {
             label: measure_label(label, theme, config),
             x: bar_x,
-            y,
+            y: task_y,
             width: bar_width,
             height: row_height,
             color,
@@ -318,7 +348,6 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
             duration: *duration,
             status: *status,
         });
-        y += row_height;
     }
     if let Some(prev_idx) = current_section_idx {
         let height = (y - sections[prev_idx].y).max(row_height);
@@ -342,8 +371,15 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
         .fold(0.0_f32, f32::max);
     let axis_pad = row_height * 0.9 + theme.font_size;
     let height = y + padding + axis_pad;
-    let width = (chart_x + chart_width + padding)
-        .max(chart_x + chart_width + max_tick_half_width + padding * 0.4);
+    let label_overflow = if compact {
+        padding + task_label_width
+    } else {
+        0.0
+    };
+    let right_padding = (max_tick_half_width + padding * 0.4)
+        .max(label_overflow)
+        .max(padding);
+    let width = chart_x + chart_width + right_padding;
 
     Layout {
         kind: graph.kind,
@@ -369,8 +405,113 @@ pub(super) fn compute_gantt_layout(graph: &Graph, theme: &Theme, config: &Layout
             task_label_width,
             title_y: chart_y - row_height * 0.6,
             ticks,
+            compact,
         }),
         width,
         height,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::{DiagramKind, GanttStatus, GanttTask, Graph};
+    use crate::layout::LayoutConfig;
+    use crate::layout::types::DiagramData;
+    use crate::theme::Theme;
+
+    use super::compute_gantt_layout;
+
+    fn make_graph(display_mode: Option<&str>, tasks: Vec<GanttTask>) -> Graph {
+        let mut graph = Graph::new();
+        graph.kind = DiagramKind::Gantt;
+        graph.gantt_display_mode = display_mode.map(|s| s.to_string());
+        let mut sections = Vec::new();
+        for t in &tasks {
+            if let Some(sec) = &t.section {
+                if !sections.contains(sec) {
+                    sections.push(sec.clone());
+                }
+            }
+        }
+        graph.gantt_sections = sections;
+        graph.gantt_tasks = tasks;
+        graph
+    }
+
+    fn task(id: &str, section: &str, start: &str, dur: &str) -> GanttTask {
+        GanttTask {
+            id: id.to_string(),
+            label: id.to_string(),
+            start: Some(start.to_string()),
+            duration: Some(dur.to_string()),
+            after: None,
+            section: Some(section.to_string()),
+            status: None,
+        }
+    }
+
+    fn milestone(id: &str, section: &str, start: &str) -> GanttTask {
+        GanttTask {
+            id: id.to_string(),
+            label: id.to_string(),
+            start: Some(start.to_string()),
+            duration: Some("0d".to_string()),
+            after: None,
+            section: Some(section.to_string()),
+            status: Some(GanttStatus::Milestone),
+        }
+    }
+
+    fn extract_task_ys(graph: &Graph) -> Vec<f32> {
+        let theme = Theme::modern();
+        let config = LayoutConfig::default();
+        let layout = compute_gantt_layout(graph, &theme, &config);
+        match &layout.diagram {
+            DiagramData::Gantt(g) => g.tasks.iter().map(|t| t.y).collect(),
+            _ => panic!("expected Gantt layout"),
+        }
+    }
+
+    #[test]
+    fn compact_non_overlapping_tasks_share_row() {
+        let graph = make_graph(
+            Some("compact"),
+            vec![
+                milestone("m1", "MacOS", "2025-09-01"),
+                milestone("m2", "MacOS", "2026-09-01"),
+                milestone("m3", "MacOS", "2027-09-01"),
+            ],
+        );
+        let ys = extract_task_ys(&graph);
+        assert_eq!(ys[0], ys[1], "m1 and m2 should share a row");
+        assert_eq!(ys[1], ys[2], "m2 and m3 should share a row");
+    }
+
+    #[test]
+    fn compact_overlapping_tasks_get_separate_rows() {
+        let graph = make_graph(
+            Some("compact"),
+            vec![
+                task("hw", "support", "2025-09-01", "1y"),
+                task("sw", "support", "2025-09-01", "2y"),
+            ],
+        );
+        let ys = extract_task_ys(&graph);
+        assert_ne!(ys[0], ys[1], "overlapping tasks must be on different rows");
+    }
+
+    #[test]
+    fn non_compact_always_separate_rows() {
+        let graph = make_graph(
+            None,
+            vec![
+                milestone("m1", "MacOS", "2025-09-01"),
+                milestone("m2", "MacOS", "2026-09-01"),
+                milestone("m3", "MacOS", "2027-09-01"),
+            ],
+        );
+        let ys = extract_task_ys(&graph);
+        assert_ne!(ys[0], ys[1]);
+        assert_ne!(ys[1], ys[2]);
     }
 }

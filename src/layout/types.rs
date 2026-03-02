@@ -585,6 +585,7 @@ pub struct GanttLayout {
     pub task_label_width: f32,
     pub title_y: f32,
     pub ticks: Vec<GanttTick>,
+    pub compact: bool,
 }
 
 #[derive(Debug, Clone)]
