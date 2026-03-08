@@ -1,0 +1,20 @@
+flowchart TD
+    subgraph ROW1["Input"]
+        direction LR
+        A["Node A"]
+        B["Node B"]
+    end
+    subgraph ROW2["Processing"]
+        direction LR
+        C["Node C"]
+        D["Node D"]
+    end
+    subgraph ROW3["Annotations"]
+        direction LR
+        NOTE1("This subgraph has only\nannotation nodes that\nhave no positioned peers")
+        NOTE2("Another annotation\nwithout a main node")
+        NOTE1 -.- NOTE2
+    end
+    A --> C
+    B --> D
+    NOTE1 -.- A
