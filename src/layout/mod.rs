@@ -5287,6 +5287,7 @@ fn build_subgraph_layouts(
     config: &LayoutConfig,
 ) -> Vec<SubgraphLayout> {
     let mut subgraphs = Vec::new();
+    let mut empty_subgraphs = Vec::new();
     for sub in &graph.subgraphs {
         let mut min_x = f32::MAX;
         let mut min_y = f32::MAX;
@@ -5303,6 +5304,22 @@ fn build_subgraph_layouts(
         }
 
         if min_x == f32::MAX {
+            empty_subgraphs.push(subgraphs.len());
+            subgraphs.push(SubgraphLayout {
+                label: String::new(),
+                label_block: TextBlock {
+                    lines: Vec::new(),
+                    width: 0.0,
+                    height: 0.0,
+                },
+                nodes: Vec::new(),
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+                style: crate::ir::NodeStyle::default(),
+                icon: None,
+            });
             continue;
         }
 
@@ -5373,9 +5390,13 @@ fn build_subgraph_layouts(
         }
 
         // Expand each parent's bounds to contain all its descendants.
+        let empty_set: HashSet<usize> = empty_subgraphs.iter().copied().collect();
         for &i in &order {
+            if empty_set.contains(&i) {
+                continue;
+            }
             for &j in &all_descendants[i] {
-                if is_region_subgraph(&graph.subgraphs[j]) {
+                if empty_set.contains(&j) || is_region_subgraph(&graph.subgraphs[j]) {
                     continue;
                 }
                 let pad = if graph.kind == crate::ir::DiagramKind::State {
@@ -5398,6 +5419,10 @@ fn build_subgraph_layouts(
                 parent.height = max_y - min_y;
             }
         }
+    }
+
+    for &i in empty_subgraphs.iter().rev() {
+        subgraphs.remove(i);
     }
 
     subgraphs.sort_by(|a, b| {
@@ -5951,5 +5976,48 @@ mod tests {
             dist <= 0.51,
             "expected routed path to pass through preferred label center, got distance {dist:.3}"
         );
+    }
+
+    #[test]
+    fn build_subgraph_layouts_with_empty_subgraph_does_not_panic() {
+        let theme = Theme::modern();
+        let config = LayoutConfig::default();
+
+        let mut graph = Graph::new();
+        graph.ensure_node("A", Some("A".into()), Some(NodeShape::Rectangle));
+        graph.ensure_node("B", Some("B".into()), Some(NodeShape::Rectangle));
+        graph.ensure_node("C", Some("C".into()), Some(NodeShape::Rectangle));
+        graph.ensure_node("D", Some("D".into()), Some(NodeShape::Rectangle));
+
+        graph.subgraphs.push(crate::ir::Subgraph {
+            id: Some("sg0".into()),
+            label: "SG0".into(),
+            nodes: vec!["A".into(), "B".into()],
+            direction: None,
+            icon: None,
+        });
+        graph.subgraphs.push(crate::ir::Subgraph {
+            id: Some("sg1".into()),
+            label: "SG1".into(),
+            nodes: vec!["ghost".into()],
+            direction: None,
+            icon: None,
+        });
+        graph.subgraphs.push(crate::ir::Subgraph {
+            id: Some("sg2".into()),
+            label: "SG2".into(),
+            nodes: vec!["C".into(), "D".into()],
+            direction: None,
+            icon: None,
+        });
+
+        let mut nodes = BTreeMap::new();
+        nodes.insert("A".into(), make_node("A", 0.0, 0.0, 60.0, 40.0));
+        nodes.insert("B".into(), make_node("B", 80.0, 0.0, 60.0, 40.0));
+        nodes.insert("C".into(), make_node("C", 0.0, 100.0, 60.0, 40.0));
+        nodes.insert("D".into(), make_node("D", 80.0, 100.0, 60.0, 40.0));
+
+        let result = build_subgraph_layouts(&graph, &nodes, &theme, &config);
+        assert_eq!(result.len(), 2, "empty subgraph should be excluded");
     }
 }
