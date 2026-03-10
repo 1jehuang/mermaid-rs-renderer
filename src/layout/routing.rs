@@ -354,6 +354,8 @@ pub(super) struct RouteContext<'a> {
     pub(super) start_offset: f32,
     pub(super) end_offset: f32,
     pub(super) stub_len: f32,
+    pub(super) start_inset: f32,
+    pub(super) end_inset: f32,
     pub(super) prefer_shorter_ties: bool,
     pub(super) preferred_label_id: Option<&'a str>,
     pub(super) preferred_label_center: Option<(f32, f32)>,
@@ -1165,6 +1167,37 @@ pub(super) fn path_coords_reasonable(points: &[(f32, f32)]) -> bool {
         .all(|(x, y)| x.is_finite() && y.is_finite() && x.abs() <= LIMIT && y.abs() <= LIMIT)
 }
 
+fn apply_endpoint_insets(
+    mut path: Vec<(f32, f32)>,
+    start_inset: f32,
+    end_inset: f32,
+) -> Vec<(f32, f32)> {
+    if start_inset > 0.0 && path.len() >= 2 {
+        let (sx, sy) = path[0];
+        let (nx, ny) = path[1];
+        let dx = sx - nx;
+        let dy = sy - ny;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > start_inset {
+            let r = start_inset / len;
+            path[0] = (sx - dx * r, sy - dy * r);
+        }
+    }
+    if end_inset > 0.0 && path.len() >= 2 {
+        let n = path.len();
+        let (px, py) = path[n - 2];
+        let (ex, ey) = path[n - 1];
+        let dx = ex - px;
+        let dy = ey - py;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > end_inset {
+            let r = end_inset / len;
+            path[n - 1] = (ex - dx * r, ey - dy * r);
+        }
+    }
+    path
+}
+
 fn point_segment_distance(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
     let vx = b.0 - a.0;
     let vy = b.1 - a.1;
@@ -1366,7 +1399,7 @@ pub(super) fn route_edge_with_avoidance(
 
         let mut best = compress_path(&candidates.swap_remove(best_idx));
         enforce_preferred_label_via(&mut best, ctx);
-        return compress_path(&best);
+        return apply_endpoint_insets(compress_path(&best), ctx.start_inset, ctx.end_inset);
     }
 
     let (_, _, is_backward) = edge_sides(ctx.from, ctx.to, ctx.direction);
@@ -1399,7 +1432,7 @@ pub(super) fn route_edge_with_avoidance(
     if ctx.fast_route {
         let mut fast = compress_path(&[start, route_start, route_end, end]);
         enforce_preferred_label_via(&mut fast, ctx);
-        return compress_path(&fast);
+        return apply_endpoint_insets(compress_path(&fast), ctx.start_inset, ctx.end_inset);
     }
     let mut candidates: Vec<Vec<(f32, f32)>> = Vec::new();
     let mut intersections: Vec<usize> = Vec::new();
@@ -1996,7 +2029,7 @@ pub(super) fn route_edge_with_avoidance(
         combined.extend(candidates.swap_remove(best_idx));
         combined.push(end);
         enforce_preferred_label_via(&mut combined, ctx);
-        return compress_path(&combined);
+        return apply_endpoint_insets(compress_path(&combined), ctx.start_inset, ctx.end_inset);
     }
 
     let mut best_idx = 0usize;
@@ -2084,7 +2117,7 @@ pub(super) fn route_edge_with_avoidance(
     combined.extend(candidates.swap_remove(best_idx));
     combined.push(end);
     enforce_preferred_label_via(&mut combined, ctx);
-    compress_path(&combined)
+    apply_endpoint_insets(compress_path(&combined), ctx.start_inset, ctx.end_inset)
 }
 
 pub(super) fn path_obstacle_intersections(

@@ -1130,6 +1130,19 @@ fn compute_flowchart_layout(
                 .and_then(|plan| plan.as_ref())
                 .map(|plan| plan.center)
         };
+        let (start_inset, end_inset) = {
+            let start = if edge.arrow_start {
+                crate::render::arrowhead_inset(graph.kind, edge.arrow_start_kind)
+            } else {
+                0.0
+            };
+            let end = if edge.arrow_end {
+                crate::render::arrowhead_inset(graph.kind, edge.arrow_end_kind)
+            } else {
+                0.0
+            };
+            (start, end)
+        };
         let route_ctx = RouteContext {
             from_id: &edge.from,
             to_id: &edge.to,
@@ -1146,6 +1159,8 @@ fn compute_flowchart_layout(
             start_offset: port_info.start_offset,
             end_offset: port_info.end_offset,
             stub_len,
+            start_inset,
+            end_inset,
             prefer_shorter_ties: !avoid_short_tie,
             preferred_label_id,
             preferred_label_center,
@@ -1185,6 +1200,8 @@ fn compute_flowchart_layout(
                 start_offset: route_ctx.start_offset,
                 end_offset: route_ctx.end_offset,
                 stub_len: route_ctx.stub_len,
+                start_inset: route_ctx.start_inset,
+                end_inset: route_ctx.end_inset,
                 prefer_shorter_ties: route_ctx.prefer_shorter_ties,
                 preferred_label_id: route_ctx.preferred_label_id,
                 preferred_label_center: route_ctx.preferred_label_center,
@@ -5793,6 +5810,8 @@ mod tests {
             end_offset: 0.0,
             fast_route: false,
             stub_len: port_stub_length(&config, &from, &to),
+            start_inset: 0.0,
+            end_inset: 0.0,
             prefer_shorter_ties: true,
             preferred_label_id: None,
             preferred_label_center: None,
@@ -5834,6 +5853,8 @@ mod tests {
             end_offset: 0.0,
             fast_route: false,
             stub_len: port_stub_length(&config, &from, &to),
+            start_inset: 0.0,
+            end_inset: 0.0,
             prefer_shorter_ties: true,
             preferred_label_id: None,
             preferred_label_center: None,
@@ -5875,6 +5896,8 @@ mod tests {
             end_offset: 0.0,
             fast_route: false,
             stub_len: port_stub_length(&config, &from, &to),
+            start_inset: 0.0,
+            end_inset: 0.0,
             prefer_shorter_ties: true,
             preferred_label_id: None,
             preferred_label_center: None,
@@ -5941,6 +5964,8 @@ mod tests {
             end_offset: 0.0,
             fast_route: false,
             stub_len: port_stub_length(&config, &from, &to),
+            start_inset: 0.0,
+            end_inset: 0.0,
             prefer_shorter_ties: true,
             preferred_label_id: Some("edge-label-reserved:0"),
             preferred_label_center: Some(preferred),

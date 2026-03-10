@@ -44,6 +44,26 @@ fn edge_dom_id(edge_idx: usize) -> String {
     format!("edge-{edge_idx}")
 }
 
+/// How many pixels the arrowhead marker penetrates past the path endpoint.
+/// Must stay in sync with the `<marker>` definitions in [`render_svg`].
+///
+/// - `OpenTriangle`: refX=1, base at x=18 -> 17 px
+/// - `ClassDependency`: refX=13, shape max x=18 -> 5 px
+/// - Generic: viewBox 10, markerWidth 8, refX=5 -> (10-5)*(8/10) = 4 px
+pub fn arrowhead_inset(
+    kind: crate::ir::DiagramKind,
+    arrow_kind: Option<crate::ir::EdgeArrowhead>,
+) -> f32 {
+    match kind {
+        crate::ir::DiagramKind::Class => match arrow_kind {
+            Some(crate::ir::EdgeArrowhead::OpenTriangle) => 17.0,
+            Some(crate::ir::EdgeArrowhead::ClassDependency) => 5.0,
+            None => 4.0,
+        },
+        _ => 0.0,
+    }
+}
+
 pub fn render_svg(layout: &Layout, theme: &Theme, config: &LayoutConfig) -> String {
     let mut svg = String::new();
     let state_font_size = if layout.kind == crate::ir::DiagramKind::State {
