@@ -17,7 +17,7 @@ static INIT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^%%\{\s*init\s*:\s*(\{.*\})\s*\}%%").unwrap());
 static PIPE_LABEL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+)\|(?P<label>.+?)\|\s*(?P<right>.+)$",
+        r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+[-.=ox]*|[-.=ox]*[-=]+[-.=ox]*>|[-.=ox]*[-=]+[-.=ox]*)\|(?P<label>.+?)\|\s*(?P<right>.+)$",
     )
     .unwrap()
 });
@@ -41,12 +41,12 @@ static COMPACT_DOTTED_LABEL_ARROW_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static ARROW_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+)\s*(?P<right>.+)$",
+        r"^(?P<left>.+?)\s*(?P<arrow><[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+[-.=ox]*|[-.=ox]*[-=]+[-.=ox]*>|[-.=ox]*[-=]+[-.=ox]*)\s*(?P<right>.+)$",
     )
     .unwrap()
 });
 static ARROW_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"<[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+|[-.=ox]*[-=]+>|[-.=ox]*[-=]+").unwrap()
+    Regex::new(r"<[-.=ox]*[-=]+[-.=ox]*>|<[-.=ox]*[-=]+[-.=ox]*|[-.=ox]*[-=]+[-.=ox]*>|[-.=ox]*[-=]+[-.=ox]*").unwrap()
 });
 
 #[derive(Debug, Default)]
@@ -6040,6 +6040,39 @@ A["foo & bar"] & B --> C"#;
         assert!(parsed.graph.nodes.contains_key("D2"));
         assert!(!parsed.graph.nodes.contains_key("risk"));
         assert!(!parsed.graph.nodes.contains_key("|high"));
+    }
+
+    #[test]
+    fn parse_pipe_edge_label_with_cross_decoration() {
+        let input = "graph TD;A--x|text including URL space|B;";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(
+            parsed.graph.edges[0].label.as_deref(),
+            Some("text including URL space")
+        );
+        assert_eq!(
+            parsed.graph.edges[0].end_decoration,
+            Some(crate::ir::EdgeDecoration::Cross)
+        );
+        assert!(parsed.graph.nodes.contains_key("A"));
+        assert!(parsed.graph.nodes.contains_key("B"));
+        assert!(!parsed.graph.nodes.contains_key("x|text"));
+    }
+
+    #[test]
+    fn parse_pipe_edge_label_with_circle_decoration() {
+        let input = "graph TD;A--o|text space|B;";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(parsed.graph.edges[0].label.as_deref(), Some("text space"));
+        assert_eq!(
+            parsed.graph.edges[0].end_decoration,
+            Some(crate::ir::EdgeDecoration::Circle)
+        );
+        assert!(parsed.graph.nodes.contains_key("A"));
+        assert!(parsed.graph.nodes.contains_key("B"));
+        assert!(!parsed.graph.nodes.contains_key("o|text"));
     }
 
     #[test]
