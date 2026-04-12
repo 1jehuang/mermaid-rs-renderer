@@ -80,7 +80,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item target\\${{ matrix.target }}\\release\\mmdr.exe dist\\
           Compress-Archive -Path dist\\mmdr.exe -DestinationPath mmdr-${{ matrix.target }}.zip
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: mmdr-${{ matrix.target }}.*
 
