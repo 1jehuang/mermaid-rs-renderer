@@ -6103,53 +6103,35 @@ fn split_id_label(token: &str) -> Option<(&str, String, crate::ir::NodeShape)> {
 
 fn parse_shape_from_brackets(raw: &str) -> (String, crate::ir::NodeShape) {
     let trimmed = raw.trim();
-    if trimmed.starts_with("[/") && trimmed.ends_with("/]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::Parallelogram,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[/", "/]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::Parallelogram);
     }
-    if trimmed.starts_with("[\\") && trimmed.ends_with("\\]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::ParallelogramAlt,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[\\", "\\]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::ParallelogramAlt);
     }
-    if trimmed.starts_with("[/") && trimmed.ends_with("\\]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::Trapezoid,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[/", "\\]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::Trapezoid);
     }
-    if trimmed.starts_with("[\\") && trimmed.ends_with("/]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::TrapezoidAlt,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[\\", "/]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::TrapezoidAlt);
     }
-    if trimmed.starts_with("[[") && trimmed.ends_with("]]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::Subroutine,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[[", "]]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::Subroutine);
     }
-    if trimmed.starts_with("[(") && trimmed.ends_with(")]") {
-        return (
-            strip_quotes(&trimmed[2..trimmed.len() - 2]),
-            crate::ir::NodeShape::Cylinder,
-        );
+    if let Some(inner) = strip_delimiters(trimmed, "[(", ")]") {
+        return (strip_quotes(inner), crate::ir::NodeShape::Cylinder);
     }
-    if trimmed.starts_with("[") && trimmed.ends_with("]") {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        if inner.starts_with('(') && inner.ends_with(')') {
-            return (
-                strip_quotes(&inner[1..inner.len() - 1]),
-                crate::ir::NodeShape::Stadium,
-            );
+    if let Some(inner) = strip_delimiters(trimmed, "[", "]") {
+        if let Some(stadium_inner) = strip_delimiters(inner, "(", ")") {
+            return (strip_quotes(stadium_inner), crate::ir::NodeShape::Stadium);
         }
         return (strip_quotes(inner), crate::ir::NodeShape::Rectangle);
     }
     (strip_quotes(trimmed), crate::ir::NodeShape::Rectangle)
+}
+
+fn strip_delimiters<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    s.strip_prefix(open)?.strip_suffix(close)
 }
 
 fn parse_shape_from_parens(raw: &str) -> (String, crate::ir::NodeShape) {
@@ -7235,5 +7217,31 @@ A["foo & bar"] & B --> C"#;
             masked.len(),
             "masked string should have same byte length as original"
         );
+    }
+
+    #[test]
+    fn parse_flowchart_overlapping_shape_delimiters() {
+        // Overlapping shape delimiters fall through to a plain rectangle.
+        for (input, expected_label) in [("flowchart LR\nA[/]", "/"), ("flowchart LR\nA[\\]", "\\")]
+        {
+            let parsed = parse_mermaid(input).unwrap();
+            let node = parsed.graph.nodes.get("A").expect("node A missing");
+            assert_eq!(node.label, expected_label);
+            assert_eq!(node.shape, crate::ir::NodeShape::Rectangle);
+        }
+
+        // Same on the right-hand side of an edge.
+        for (input, expected_label) in [
+            ("flowchart LR\nA --> B[/]", "/"),
+            ("flowchart LR\nA --> B[\\]", "\\"),
+        ] {
+            let parsed = parse_mermaid(input).unwrap();
+            let b = parsed.graph.nodes.get("B").expect("node B missing");
+            assert_eq!(b.label, expected_label);
+            assert_eq!(b.shape, crate::ir::NodeShape::Rectangle);
+            assert_eq!(parsed.graph.edges.len(), 1);
+            assert_eq!(parsed.graph.edges[0].from, "A");
+            assert_eq!(parsed.graph.edges[0].to, "B");
+        }
     }
 }
