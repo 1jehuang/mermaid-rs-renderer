@@ -879,6 +879,12 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
             &mut routed_points,
             config,
         );
+        path_cleanup::detour_flowchart_paths_wider_clearance(
+            graph,
+            nodes,
+            &mut routed_points,
+            config,
+        );
     }
 
     route_labels::apply_label_dummy_anchors(

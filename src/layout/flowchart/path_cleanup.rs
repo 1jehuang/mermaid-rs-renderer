@@ -478,6 +478,93 @@ pub(in crate::layout) fn detour_flowchart_paths_around_non_endpoint_nodes(
     }
 }
 
+pub(in crate::layout) fn detour_flowchart_paths_wider_clearance(
+    graph: &Graph,
+    nodes: &BTreeMap<String, NodeLayout>,
+    routed_points: &mut [Vec<(f32, f32)>],
+    config: &LayoutConfig,
+) {
+    let base_clearance = (config.node_spacing * 0.12).max(8.0);
+    for (idx, points) in routed_points.iter_mut().enumerate() {
+        let Some(edge) = graph.edges.get(idx) else {
+            continue;
+        };
+        let starting_hits = count_non_endpoint_node_hits(points, &edge.from, &edge.to, nodes);
+        if starting_hits == 0 {
+            continue;
+        }
+        for _ in 0..6 {
+            let Some((first_seg_idx, last_seg_idx, obstacle)) =
+                first_non_endpoint_node_hit(points, &edge.from, &edge.to, nodes)
+            else {
+                break;
+            };
+            let mut best: Option<Vec<(f32, f32)>> = None;
+            let mut best_cost = f32::INFINITY;
+            let mut best_hits = starting_hits;
+            for clearance_scale in [1.0_f32, 1.5, 2.5, 4.0] {
+                let clearance = base_clearance * clearance_scale;
+                for candidate in node_detour_candidates(
+                    points,
+                    first_seg_idx,
+                    last_seg_idx,
+                    &obstacle,
+                    clearance,
+                ) {
+                    let hits =
+                        count_non_endpoint_node_hits(&candidate, &edge.from, &edge.to, nodes);
+                    if hits > best_hits {
+                        continue;
+                    }
+                    let cost =
+                        path_length(&candidate) + path_bend_count(&candidate) as f32 * clearance;
+                    if hits < best_hits || cost < best_cost {
+                        best_cost = cost;
+                        best_hits = hits;
+                        best = Some(candidate);
+                    }
+                }
+                if best_hits == 0 {
+                    break;
+                }
+            }
+            let Some(candidate) = best else {
+                break;
+            };
+            *points = candidate;
+        }
+    }
+}
+
+fn count_non_endpoint_node_hits(
+    path: &[(f32, f32)],
+    from_id: &str,
+    to_id: &str,
+    nodes: &BTreeMap<String, NodeLayout>,
+) -> usize {
+    let mut count = 0;
+    for node in nodes.values() {
+        if node.id == from_id || node.id == to_id || node.hidden || node.anchor_subgraph.is_some() {
+            continue;
+        }
+        let obstacle = Obstacle {
+            id: node.id.clone(),
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            members: None,
+        };
+        if path
+            .windows(2)
+            .any(|seg| segment_intersects_rect(seg[0], seg[1], &obstacle))
+        {
+            count += 1;
+        }
+    }
+    count
+}
+
 fn bump_orthogonal_segment(
     points: &[(f32, f32)],
     seg_idx: usize,
