@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::time::Instant;
 
 use crate::config::LayoutConfig;
 use crate::ir::{DiagramKind, Graph};
@@ -217,7 +216,7 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
     };
     let mut stage_metrics = stage_metrics;
 
-    let port_assignment_start = Instant::now();
+    let port_assignment_start = crate::time::Instant::now();
     let content_bounds = visible_node_bounds(nodes);
     let mut node_degrees: HashMap<String, usize> = HashMap::new();
     for edge in &graph.edges {
@@ -509,7 +508,7 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
             .saturating_add(port_assignment_start.elapsed().as_micros());
     }
 
-    let edge_routing_start = Instant::now();
+    let edge_routing_start = crate::time::Instant::now();
     let lane_assignments = plan::plan_edge_lanes(graph, nodes, subgraphs, config);
     let lane_offsets = lane_assignments.effective_offsets(&edge_ports, graph.kind, config);
     let pair_counts = lane_assignments.pair_counts;
