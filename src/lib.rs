@@ -92,6 +92,7 @@
 pub mod cli;
 pub mod config;
 mod edge_geometry;
+mod time;
 pub mod error;
 pub mod ir;
 pub mod layout;
@@ -339,8 +340,7 @@ pub fn render_with_detailed_timing(
     input: &str,
     options: RenderOptions,
 ) -> anyhow::Result<RenderDetailedResult> {
-    use std::time::Instant;
-
+    use crate::time::Instant;
     let t0 = Instant::now();
     let parsed = parse_mermaid(input)?;
     let parse_us = t0.elapsed().as_micros();

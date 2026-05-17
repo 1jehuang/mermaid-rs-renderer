@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::time::Instant;
+use crate::time::Instant;
 
 use crate::config::LayoutConfig;
 use crate::ir::{DiagramKind, Graph};
