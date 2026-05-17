@@ -131,7 +131,7 @@ pub(super) fn is_horizontal(direction: Direction) -> bool {
     matches!(direction, Direction::LeftRight | Direction::RightLeft)
 }
 
-pub(super) fn side_is_vertical(side: EdgeSide) -> bool {
+pub(crate) fn side_is_vertical(side: EdgeSide) -> bool {
     matches!(side, EdgeSide::Left | EdgeSide::Right)
 }
 
@@ -239,10 +239,18 @@ pub(super) fn edge_sides_balanced(
             } else {
                 (EdgeSide::Top, EdgeSide::Top, primary.2)
             }
-        } else if (to.x + to.width / 2.0) >= (from.x + from.width / 2.0) {
-            (EdgeSide::Right, EdgeSide::Right, primary.2)
         } else {
-            (EdgeSide::Left, EdgeSide::Left, primary.2)
+            // For vertical layouts pick the less-loaded lateral side so the
+            // back-edge port sits at the face midpoint and routes cleanly.
+            let left_load = side_load_for_node(side_loads, from_id, EdgeSide::Left)
+                + side_load_for_node(side_loads, to_id, EdgeSide::Left);
+            let right_load = side_load_for_node(side_loads, from_id, EdgeSide::Right)
+                + side_load_for_node(side_loads, to_id, EdgeSide::Right);
+            if left_load <= right_load {
+                (EdgeSide::Left, EdgeSide::Left, primary.2)
+            } else {
+                (EdgeSide::Right, EdgeSide::Right, primary.2)
+            }
         };
     }
     let from_degree = node_degrees.get(from_id).copied().unwrap_or(0);
@@ -848,7 +856,7 @@ pub(super) fn port_stub_point(point: (f32, f32), side: EdgeSide, length: f32) ->
     }
 }
 
-pub(super) fn shape_polygon_points(node: &NodeLayout) -> Option<Vec<(f32, f32)>> {
+pub(crate) fn shape_polygon_points(node: &NodeLayout) -> Option<Vec<(f32, f32)>> {
     let x = node.x;
     let y = node.y;
     let w = node.width;
@@ -930,7 +938,7 @@ pub(super) fn shape_polygon_points(node: &NodeLayout) -> Option<Vec<(f32, f32)>>
     }
 }
 
-pub(super) fn ray_polygon_intersection(
+pub(crate) fn ray_polygon_intersection(
     origin: (f32, f32),
     dir: (f32, f32),
     poly: &[(f32, f32)],
@@ -966,7 +974,7 @@ pub(super) fn ray_polygon_intersection(
     best_t.map(|t| (ox + rx * t, oy + ry * t))
 }
 
-pub(super) fn ray_ellipse_intersection(
+pub(crate) fn ray_ellipse_intersection(
     origin: (f32, f32),
     dir: (f32, f32),
     center: (f32, f32),

@@ -509,6 +509,87 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
             .saturating_add(port_assignment_start.elapsed().as_micros());
     }
 
+    // Assign evenly-spaced centered port offsets BEFORE routing so the
+    // router uses the correct anchor positions.
+    //
+    // Exits and entries on the same face are grouped together so they
+    // never land at the same offset (shared-face collision).
+    // Sort key per face type:
+    //   mixed (exits + entries) → other-node center for all ports (geometric no-crossing)
+    //   exits only              → target center (same rule, avoids ideal_port_pos reversal)
+    //   entries only            → initial offset from port assignment (preserves routing
+    //                             direction determined by the routing algorithm)
+    {
+        use crate::layout::routing::side_is_vertical;
+
+        // (node_id, side) → Vec<(edge_idx, is_exit)>
+        let mut face_ports: HashMap<(String, EdgeSide), Vec<(usize, bool)>> = HashMap::new();
+        for (idx, edge) in graph.edges.iter().enumerate() {
+            // Self-loops exit and re-enter the same face; their port positions are
+            // determined by the self-loop routing algorithm. Including them here
+            // inflates the port count and displaces adjacent regular edges.
+            if edge.from == edge.to { continue; }
+            let (start_side, end_side) = selected_edge_sides[idx];
+            face_ports.entry((edge.from.clone(), start_side)).or_default().push((idx, true));
+            face_ports.entry((edge.to.clone(), end_side)).or_default().push((idx, false));
+        }
+
+        for ((node_id, side), ports) in &face_ports {
+            let Some(node) = nodes.get(node_id) else { continue; };
+            let face_len = if side_is_vertical(*side) { node.height } else { node.width };
+            let n = ports.len();
+
+            let has_exits   = ports.iter().any(|&(_, exit)| exit);
+            let has_entries = ports.iter().any(|&(_, exit)| !exit);
+            let mixed = has_exits && has_entries;
+
+            // Compute sort key for every port.
+            // Mixed/exit faces: other-node center on the face axis (geometric ordering).
+            // Entry-only faces: initial end_offset (preserves routing-path direction).
+            let keys: Vec<f32> = ports.iter().map(|&(edge_idx, is_exit)| {
+                if is_exit || mixed {
+                    let edge = match graph.edges.get(edge_idx) { Some(e) => e, None => return 0.0 };
+                    let other_id = if is_exit { &edge.to } else { &edge.from };
+                    let other = nodes.get(other_id.as_str());
+                    if side_is_vertical(*side) {
+                        other.map(|n| n.y + n.height / 2.0).unwrap_or(0.0)
+                    } else {
+                        other.map(|n| n.x + n.width / 2.0).unwrap_or(0.0)
+                    }
+                } else {
+                    edge_ports.get(edge_idx).map(|p| p.end_offset).unwrap_or(0.0)
+                }
+            }).collect();
+
+            // For mixed faces, only redistribute when the connected nodes lie at clearly
+            // different positions on the face axis (diff > half the face length).  When
+            // nodes are at the same y/x (same rank — peer handoffs, etc.) the sort keys
+            // are nearly equal and redistributing by ±spacing would be arbitrary and
+            // can push a path through its own label.
+            if mixed {
+                let min_k = keys.iter().cloned().fold(f32::MAX, f32::min);
+                let max_k = keys.iter().cloned().fold(f32::MIN, f32::max);
+                if max_k - min_k < face_len * 0.5 {
+                    continue; // leave at the offsets from the initial port assignment
+                }
+            }
+
+            let mut sorted: Vec<(usize, bool, f32)> = ports.iter().zip(keys.iter())
+                .map(|(&(i, e), &k)| (i, e, k))
+                .collect();
+            sorted.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+            let spacing = (face_len * 0.9 / (n + 1) as f32).max(16.0);
+            let start = -spacing * (n as f32 - 1.0) / 2.0;
+            for (rank, &(edge_idx, is_exit, _)) in sorted.iter().enumerate() {
+                let offset = start + rank as f32 * spacing;
+                if let Some(info) = edge_ports.get_mut(edge_idx) {
+                    if is_exit { info.start_offset = offset; } else { info.end_offset = offset; }
+                }
+            }
+        }
+    }
+
     let edge_routing_start = Instant::now();
     let lane_assignments = plan::plan_edge_lanes(graph, nodes, subgraphs, config);
     let lane_offsets = lane_assignments.effective_offsets(&edge_ports, graph.kind, config);

@@ -979,7 +979,38 @@ pub fn render_svg_with_dimensions(
             _ => 2.0,
         };
         for (edge_idx, edge) in layout.edges.iter().enumerate() {
-            let d = if layout.kind == crate::ir::DiagramKind::Mindmap && edge.points.len() > 2 {
+            let arrowhead_size: f32 = match edge.style {
+                crate::ir::EdgeStyle::Thick => (3.5f32 * 2.2f32 + 6.0f32).clamp(6.0f32, 14.0f32),
+                _ => (base_edge_width * 2.2f32 + 6.0f32).clamp(6.0f32, 14.0f32),
+            };
+            let d = if overlay_flowchart {
+                let mut pts = edge.points.clone();
+                if edge.arrow_end {
+                    if let Some(node) = layout.nodes.get(&edge.to) {
+                        let angle = edge_endpoint_angle(&edge.points, false);
+                        if let Some(last) = pts.last_mut() {
+                            if let Some(boundary) = flowchart_entry_boundary(*last, angle, node) {
+                                let r = angle.to_radians();
+                                *last = (boundary.0 - r.cos() * arrowhead_size,
+                                         boundary.1 - r.sin() * arrowhead_size);
+                            }
+                        }
+                    }
+                }
+                if edge.arrow_start {
+                    if let Some(node) = layout.nodes.get(&edge.from) {
+                        let angle = edge_endpoint_angle(&edge.points, true);
+                        if let Some(first) = pts.first_mut() {
+                            if let Some(boundary) = flowchart_entry_boundary(*first, angle + 180.0, node) {
+                                let r = angle.to_radians();
+                                *first = (boundary.0 + r.cos() * arrowhead_size,
+                                          boundary.1 + r.sin() * arrowhead_size);
+                            }
+                        }
+                    }
+                }
+                points_to_smooth_path(&pts, 12.0)
+            } else if layout.kind == crate::ir::DiagramKind::Mindmap && edge.points.len() > 2 {
                 basis_curve_path(&edge.points)
             } else {
                 points_to_path(&edge.points)
@@ -1048,26 +1079,22 @@ pub fn render_svg_with_dimensions(
             ));
 
             if overlay_flowchart {
-                if edge.arrow_start
-                    && let Some(point) = edge.points.first().copied()
-                {
+                if edge.arrow_start {
                     let angle = edge_endpoint_angle(&edge.points, true);
-                    let angle = layout
-                        .nodes
-                        .get(&edge.from)
-                        .and_then(|node| flowchart_endpoint_arrow_angle(point, node))
-                        .unwrap_or(angle + 180.0);
+                    let point = layout.nodes.get(&edge.from)
+                        .and_then(|node| flowchart_entry_boundary(
+                            edge.points.first().copied().unwrap_or((0.0,0.0)),
+                            angle + 180.0, node))
+                        .unwrap_or_else(|| edge.points.first().copied().unwrap_or((0.0,0.0)));
                     svg.push_str(&arrowhead_svg(point, angle, stroke.as_str(), stroke_width));
                 }
-                if edge.arrow_end
-                    && let Some(point) = edge.points.last().copied()
-                {
+                if edge.arrow_end {
                     let angle = edge_endpoint_angle(&edge.points, false);
-                    let angle = layout
-                        .nodes
-                        .get(&edge.to)
-                        .and_then(|node| flowchart_endpoint_arrow_angle(point, node))
-                        .unwrap_or(angle);
+                    let point = layout.nodes.get(&edge.to)
+                        .and_then(|node| flowchart_entry_boundary(
+                            edge.points.last().copied().unwrap_or((0.0,0.0)),
+                            angle, node))
+                        .unwrap_or_else(|| edge.points.last().copied().unwrap_or((0.0,0.0)));
                     svg.push_str(&arrowhead_svg(point, angle, stroke.as_str(), stroke_width));
                 }
             }
@@ -1580,6 +1607,122 @@ fn points_to_path(points: &[(f32, f32)]) -> String {
         d.push_str(&format!(" L {:.3},{:.3}", x, y));
     }
     d
+}
+
+// Rounds interior corners of an orthogonal path using quadratic beziers.
+fn points_to_smooth_path(points: &[(f32, f32)], radius: f32) -> String {
+    let deduped = dedupe_points(points);
+    let n = deduped.len();
+    if n <= 2 { return points_to_path(&deduped); }
+    let mut d = format!("M {:.3},{:.3}", deduped[0].0, deduped[0].1);
+    for i in 1..n {
+        let (x, y) = deduped[i];
+        if i == n - 1 {
+            d.push_str(&format!(" L {:.3},{:.3}", x, y));
+        } else {
+            let (px, py) = deduped[i - 1];
+            let (nx, ny) = deduped[i + 1];
+            let len_in  = ((x - px).powi(2) + (y - py).powi(2)).sqrt();
+            let len_out = ((nx - x).powi(2) + (ny - y).powi(2)).sqrt();
+            let r = radius.min(len_in * 0.4).min(len_out * 0.4);
+            if r < 1.0 { d.push_str(&format!(" L {:.3},{:.3}", x, y)); continue; }
+            let t_in = r / len_in;
+            let bx = x - (x - px) * t_in;
+            let by = y - (y - py) * t_in;
+            let t_out = r / len_out;
+            let cx = x + (nx - x) * t_out;
+            let cy = y + (ny - y) * t_out;
+            d.push_str(&format!(" L {:.3},{:.3} Q {:.3},{:.3} {:.3},{:.3}", bx, by, x, y, cx, cy));
+        }
+    }
+    d
+}
+
+// Returns the exact shape boundary at a given perpendicular position.
+// For rectangles: bounding box edge. For diamonds/circles: actual shape edge.
+fn shape_boundary_at(node: &crate::layout::NodeLayout, parallel_coord: f32, entering_from_left_right: bool) -> f32 {
+    let cx = node.x + node.width / 2.0;
+    let cy = node.y + node.height / 2.0;
+    let hw = node.width / 2.0;
+    let hh = node.height / 2.0;
+    match node.shape {
+        crate::ir::NodeShape::Diamond => {
+            if entering_from_left_right {
+                // Left/Right face: parallel_coord = y, find x boundary
+                let dy = (parallel_coord - cy).abs().min(hh);
+                let t = dy / hh;
+                let bx = hw * (1.0 - t); // distance from center
+                // Left face: cx - bx, Right face: cx + bx
+                bx // caller adds cx ± bx
+            } else {
+                // Top/Bottom face: parallel_coord = x, find y boundary
+                let dx = (parallel_coord - cx).abs().min(hw);
+                let t = dx / hw;
+                hh * t // y offset from top/bottom vertex
+            }
+        }
+        crate::ir::NodeShape::Circle | crate::ir::NodeShape::DoubleCircle => {
+            let r = hw; // assume square bounding box for circles
+            if entering_from_left_right {
+                let dy = (parallel_coord - cy).min(r);
+                let bx = (r * r - dy * dy).max(0.0).sqrt();
+                bx
+            } else {
+                let dx = (parallel_coord - cx).min(r);
+                let by = (r * r - dx * dx).max(0.0).sqrt();
+                by
+            }
+        }
+        crate::ir::NodeShape::Hexagon => {
+            // Vertices: top-left (cx-hw*0.5, top), top-right (cx+hw*0.5, top),
+            //           right (cx+hw, cy), bottom-right, bottom-left, left (cx-hw, cy).
+            // Left/right entry: boundary x varies with y.
+            //   bx = hw * (1 - 0.5 * |y - cy| / hh)
+            // Top/bottom entry: flat region for |x - cx| <= hw*0.5, angled beyond.
+            if entering_from_left_right {
+                let dy = ((parallel_coord - cy) / hh).abs().min(1.0);
+                hw * (1.0 - 0.5 * dy)
+            } else {
+                let dx = ((parallel_coord - cx) / hw).abs().min(1.0);
+                if dx <= 0.5 {
+                    hh
+                } else {
+                    hh * (1.0 - 2.0 * (dx - 0.5))
+                }
+            }
+        }
+        _ => {
+            // Rectangle, stadium, etc: bounding box is close enough
+            if entering_from_left_right { hw } else { hh }
+        }
+    }
+}
+
+fn flowchart_entry_boundary(
+    stub_pt: (f32, f32),
+    angle_deg: f32,
+    node: &crate::layout::NodeLayout,
+) -> Option<(f32, f32)> {
+    let cx = node.x + node.width / 2.0;
+    let cy = node.y + node.height / 2.0;
+    let a = ((angle_deg % 360.0) + 360.0) % 360.0;
+    Some(if a < 45.0 || a >= 315.0 {
+        // Entering from left: find left boundary at y=stub_pt.1
+        let bx = shape_boundary_at(node, stub_pt.1, true);
+        (cx - bx, stub_pt.1)
+    } else if a < 135.0 {
+        // Entering from top: find top boundary at x=stub_pt.0
+        let by = shape_boundary_at(node, stub_pt.0, false);
+        (stub_pt.0, cy - by)
+    } else if a < 225.0 {
+        // Entering from right: find right boundary at y=stub_pt.1
+        let bx = shape_boundary_at(node, stub_pt.1, true);
+        (cx + bx, stub_pt.1)
+    } else {
+        // Entering from bottom: find bottom boundary at x=stub_pt.0
+        let by = shape_boundary_at(node, stub_pt.0, false);
+        (stub_pt.0, cy + by)
+    })
 }
 
 /// Port of d3's `curveBasis` (open uniform cubic B-spline). Given control

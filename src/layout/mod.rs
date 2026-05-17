@@ -14,7 +14,7 @@ mod pie;
 mod quadrant;
 mod radar;
 mod ranking;
-mod routing;
+pub(crate) mod routing;
 mod sankey;
 mod sequence;
 mod subgraphs;
