@@ -117,6 +117,14 @@ mmdr parses Mermaid syntax natively in Rust and renders directly to SVG. No brow
 ## Installation
 
 ```bash
+# Nix (flakes)
+nix run github:1jehuang/mermaid-rs-renderer
+
+# Or install permanently:
+nix profile install github:1jehuang/mermaid-rs-renderer
+```
+
+```bash
 # crates.io (recommended)
 cargo install mermaid-rs-renderer
 
