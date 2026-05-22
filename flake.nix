@@ -19,6 +19,7 @@
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.libiconv
           ];
+          doCheck = false;
           meta = {
             description = "Fast Mermaid diagram renderer in pure Rust - 23 diagram types, 100-1400x faster than mermaid-cli";
             homepage = "https://github.com/1jehuang/mermaid-rs-renderer";

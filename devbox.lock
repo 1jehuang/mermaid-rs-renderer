@@ -1,0 +1,203 @@
+{
+  "lockfile_version": "1",
+  "packages": {
+    "act": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#act",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/cxphgb801n8smiqy4a64bnq6fz0dggyc-act-0.2.88",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "ast-grep": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#ast-grep",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/8zdqw0i9zjzglh9fnicb0hmyxam28n31-ast-grep-0.42.1",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "cargo": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#cargo",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/5z8rq35zk9jqnnfw4m49fwpgq7phdhai-cargo-1.95.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "clippy": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#clippy",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/ipr8v8md5glz2c6nd1zi7193s62va753-clippy-1.95.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "devbox": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#devbox",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/h6d5aj25hlam4mafap44l90rxamaj95k-devbox-0.17.2",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "direnv": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#direnv",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/wwg5y1lp99133n0irr1fb0hd18wwk332-direnv-2.37.1",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "gh": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#gh",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/arfkhrr2bcmdrg6ncgnk6vaqx6qfv3vl-gh-2.92.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "git": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#git",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/s9lsrlgwr3sabw9a2dl3laykas0ijk85-git-2.54.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "github:NixOS/nixpkgs/nixpkgs-unstable": {
+      "last_modified": "2026-05-22T01:51:30Z",
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf?lastModified=1779414690"
+    },
+    "glab": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#glab",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/gsn4khzm536bn74my6wgf6b3nz0j5wjg-glab-1.93.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "just": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#just",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/7ppiil9ycr565vqgbc18x4rpgbfgcnzy-just-1.51.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/144wqvh3s441y05xvzn8m16rhcqbki7d-just-1.51.0-man",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "rust-analyzer": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#rust-analyzer",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "04-27",
+              "path": "/nix/store/40jnzcmhddkwf4qjcv5as05cbxyslavj-rust-analyzer-2026-04-27",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "rustc": {
+      "plugin_version": "0.0.1",
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#rustc",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "man",
+              "path": "/nix/store/2cvnw62k02n4afiahfrip1ambv8c2489-rustc-wrapper-1.95.0-man",
+              "default": true
+            },
+            {
+              "path": "/nix/store/6b0k5kdmlfl91qa8mk3ssfgvskqkvy4r-rustc-wrapper-1.95.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    },
+    "rustfmt": {
+      "resolved": "github:NixOS/nixpkgs/6dedf69f94d03cbe7bdde106f2d4c23ae2a853bf#rustfmt",
+      "source": "nixpkg",
+      "systems": {
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "path": "/nix/store/3w8bdmiz9xjr7yyggvpkf60pg8rm8km3-rustfmt-1.95.0",
+              "default": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}
