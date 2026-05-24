@@ -3776,6 +3776,7 @@ fn parse_block_diagram(input: &str) -> Result<ParseOutput> {
     graph.direction = Direction::LeftRight;
     let (lines, init_config) = preprocess_input(input)?;
     let mut block = crate::ir::BlockDiagram::default();
+    let mut group_depth: usize = 0;
 
     for raw_line in lines {
         let line = raw_line.trim();
@@ -3783,9 +3784,37 @@ fn parse_block_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
         let lower = line.to_ascii_lowercase();
-        if lower.starts_with("block") {
+
+        if lower.starts_with("block") && !lower.starts_with("block:") {
             continue;
         }
+
+        if lower.starts_with("block:") {
+            let rest = line[6..].trim();
+            let (token, span) = if let Some(colon) = rest.rfind(':')
+                && let Ok(n) = rest[colon + 1..].trim().parse::<usize>()
+                && n > 0
+            {
+                (rest[..colon].trim(), n)
+            } else {
+                (rest, 1usize)
+            };
+            let (id, label, shape, classes) = parse_node_token(token);
+            if !id.is_empty() {
+                graph.ensure_node(&id, label, shape);
+                if !classes.is_empty() {
+                    apply_node_classes(&mut graph, &id, &classes);
+                }
+                block.nodes.push(crate::ir::BlockNode {
+                    id,
+                    span,
+                    is_space: false,
+                });
+            }
+            group_depth += 1;
+            continue;
+        }
+
         if lower.starts_with("columns") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2
@@ -3797,6 +3826,20 @@ fn parse_block_diagram(input: &str) -> Result<ParseOutput> {
             continue;
         }
         if lower == "end" {
+            group_depth = group_depth.saturating_sub(1);
+            continue;
+        }
+
+        if lower.starts_with("classdef ")
+            || lower == "classdef"
+            || lower.starts_with("class ")
+            || lower.starts_with("style ")
+            || lower.starts_with("linkstyle ")
+        {
+            continue;
+        }
+
+        if group_depth > 0 && parse_edge_line(line).is_none() {
             continue;
         }
         if let Some((left, label, right, edge_meta)) = parse_edge_line(line) {
