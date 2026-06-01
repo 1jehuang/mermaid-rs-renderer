@@ -16,7 +16,15 @@ pub fn measure_text_width(text: &str, font_size: f32, font_family: &str) -> Opti
     if text.is_empty() || font_size <= 0.0 {
         return Some(0.0);
     }
-    let mut guard = TEXT_MEASURER.lock().ok()?;
+    // Ignore-poison idiom: a panic elsewhere while the measurer lock was held
+    // poisons the mutex, but the measurer's only state is a glyph-advance cache
+    // with no cross-render invariant, so recovering the inner value is sound.
+    // Using `.ok()?` here instead would permanently degrade every subsequent
+    // measurement to `None` (the ~0.56em heuristic fallback) for the process
+    // lifetime after a single transient panic.
+    let mut guard = TEXT_MEASURER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.measure(text, font_size, font_family)
 }
 
@@ -339,5 +347,33 @@ mod tests {
             normalize_family_key("trebuchet ms"),
             "v2-font-family-case:trebuchet ms"
         );
+    }
+
+    /// NF-03: a panic that poisons the shared measurer mutex must NOT
+    /// permanently degrade subsequent measurements. The ignore-poison idiom in
+    /// `measure_text_width` recovers the inner measurer, so a measurement after
+    /// a poisoning panic returns the SAME value as before it (rather than
+    /// `None`/heuristic for the process lifetime, as `.lock().ok()?` would).
+    #[test]
+    fn measurer_recovers_after_lock_poison() {
+        // Baseline (also forces the lazy measurer init).
+        let baseline = measure_text_width("Hello", 16.0, "sans-serif");
+        assert!(baseline.is_some(), "baseline measurement must succeed");
+
+        // Poison the mutex: panic while holding the lock.
+        let _ = std::thread::spawn(|| {
+            let _guard = TEXT_MEASURER.lock().expect("acquire lock to poison");
+            panic!("intentional poison for NF-03 recovery test");
+        })
+        .join();
+        assert!(
+            TEXT_MEASURER.is_poisoned(),
+            "mutex should be poisoned after the panic"
+        );
+
+        // After poison, measurement must still succeed and match the baseline,
+        // proving the inner measurer was recovered rather than abandoned.
+        let after = measure_text_width("Hello", 16.0, "sans-serif");
+        assert_eq!(after, baseline, "measurer must recover from poison");
     }
 }
