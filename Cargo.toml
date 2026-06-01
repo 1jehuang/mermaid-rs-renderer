@@ -52,10 +52,15 @@ serde_json = "1.0"
 json5 = "1.3"
 thiserror = "2.0"
 once_cell = "1.21.4"
-fontdb = "0.23"
+# default-features=false drops fs/memmap/fontconfig: no system-font enumeration,
+# no on-disk cache, no fontconfig C-lib. Required for sandboxed iOS + clean
+# cross-compile. The renderer ships its own embedded face (see embedded_font.rs).
+fontdb = { version = "0.23", default-features = false, features = ["std"] }
 ttf-parser = "0.25"
-resvg = { version = "0.47.0", optional = true }
-usvg = { version = "0.47.0", optional = true }
+# default-features=false on resvg/usvg drops system-fonts/memmap-fonts (and resvg's
+# raster-images), keeping only vector text rendering against the embedded fontdb.
+resvg = { version = "0.47.0", optional = true, default-features = false, features = ["text"] }
+usvg = { version = "0.47.0", optional = true, default-features = false, features = ["text"] }
 
 [dev-dependencies]
 criterion = "0.8"

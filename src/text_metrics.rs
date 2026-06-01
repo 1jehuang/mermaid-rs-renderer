@@ -1,16 +1,12 @@
-use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::fs;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use ttf_parser::{Face, GlyphId};
 
+use crate::embedded_font::EMBEDDED_FONT;
 use crate::unicode_width::{Cluster, consume_cluster, is_cjk_wide_char};
 
 static TEXT_MEASURER: Lazy<Mutex<TextMeasurer>> = Lazy::new(|| Mutex::new(TextMeasurer::new()));
-const FONT_CACHE_VERSION: &str = "v2-font-family-case";
 
 pub fn measure_text_width(text: &str, font_size: f32, font_family: &str) -> Option<f32> {
     if text.is_empty() || font_size <= 0.0 {
@@ -30,118 +26,34 @@ pub fn average_char_width(font_family: &str, font_size: f32) -> Option<f32> {
     Some(width / count)
 }
 
+/// Text measurement against the compile-time embedded face.
+///
+/// All CSS family names resolve to the single embedded DejaVu Sans face: the
+/// renderer performs no system-font enumeration and no on-disk caching, so
+/// layout metrics are deterministic and identical across every platform
+/// (including sandboxed iOS). The `font_family` argument is retained for API
+/// compatibility but never changes which face is used.
 struct TextMeasurer {
-    db: Database,
-    loaded_system_fonts: bool,
-    cache: HashMap<String, Option<FontFace>>,
+    face: Option<FontFace>,
+    initialized: bool,
 }
 
 impl TextMeasurer {
     fn new() -> Self {
-        let db = Database::new();
         Self {
-            db,
-            loaded_system_fonts: false,
-            cache: HashMap::new(),
+            face: None,
+            initialized: false,
         }
     }
 
-    fn measure(&mut self, text: &str, font_size: f32, font_family: &str) -> Option<f32> {
-        let family_key = normalize_family_key(font_family);
-        let face = if self.cache.contains_key(&family_key) {
-            self.cache
-                .get_mut(&family_key)
-                .and_then(|face| face.as_mut())
-        } else {
-            let face = self.load_face(font_family);
-            self.cache.insert(family_key.clone(), face);
-            self.cache
-                .get_mut(&family_key)
-                .and_then(|face| face.as_mut())
-        }?;
+    fn measure(&mut self, text: &str, font_size: f32, _font_family: &str) -> Option<f32> {
+        if !self.initialized {
+            self.face = FontFace::from_embedded();
+            self.initialized = true;
+        }
+        let face = self.face.as_mut()?;
         let normalized = text.replace('\t', "    ");
         face.measure_width(&normalized, font_size)
-    }
-
-    fn load_face(&mut self, font_family: &str) -> Option<FontFace> {
-        let family_key = normalize_family_key(font_family);
-        if let Some(face) = load_cached_face(&family_key) {
-            return Some(face);
-        }
-        if !self.loaded_system_fonts {
-            self.db.load_system_fonts();
-            self.loaded_system_fonts = true;
-        }
-        #[derive(Clone, Copy)]
-        enum FamilyToken {
-            Generic(fontdb::Family<'static>),
-            Name(usize),
-        }
-
-        let mut names: Vec<String> = Vec::new();
-        let mut order: Vec<FamilyToken> = Vec::new();
-        for part in font_family.split(',') {
-            let raw = part.trim().trim_matches('"').trim_matches('\'');
-            if raw.is_empty() {
-                continue;
-            }
-            let lower = raw.to_ascii_lowercase();
-            match lower.as_str() {
-                "serif" => order.push(FamilyToken::Generic(Family::Serif)),
-                "sans-serif" => order.push(FamilyToken::Generic(Family::SansSerif)),
-                "monospace" => order.push(FamilyToken::Generic(Family::Monospace)),
-                "cursive" => order.push(FamilyToken::Generic(Family::Cursive)),
-                "fantasy" => order.push(FamilyToken::Generic(Family::Fantasy)),
-                "system-ui" | "-apple-system" | "ui-sans-serif" => {
-                    order.push(FamilyToken::Generic(Family::SansSerif))
-                }
-                "ui-monospace" => order.push(FamilyToken::Generic(Family::Monospace)),
-                _ => {
-                    let idx = names.len();
-                    names.push(
-                        canonical_family_name(&self.db, raw).unwrap_or_else(|| raw.to_string()),
-                    );
-                    order.push(FamilyToken::Name(idx));
-                }
-            }
-        }
-        if order.is_empty() {
-            order.push(FamilyToken::Generic(Family::SansSerif));
-        }
-
-        let mut families: Vec<Family<'_>> = Vec::with_capacity(order.len());
-        for token in order {
-            match token {
-                FamilyToken::Generic(family) => families.push(family),
-                FamilyToken::Name(idx) => families.push(Family::Name(names[idx].as_str())),
-            }
-        }
-
-        let query = Query {
-            families: &families,
-            weight: Weight::NORMAL,
-            stretch: Stretch::Normal,
-            style: Style::Normal,
-        };
-        let id = self.db.query(&query)?;
-        let mut loaded: Option<FontFace> = None;
-        self.db.with_face_data(id, |data, index| {
-            let bytes = data.to_vec();
-            if let Ok(face) = Face::parse(&bytes, index) {
-                let units_per_em = face.units_per_em().max(1);
-                if let Some((font_path, meta_path)) = cache_paths(&family_key)
-                    && !font_path.exists()
-                {
-                    if let Some(parent) = font_path.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    let _ = fs::write(&font_path, &bytes);
-                    let _ = fs::write(&meta_path, index.to_string());
-                }
-                loaded = Some(FontFace::new(bytes, index, units_per_em));
-            }
-        });
-        loaded
     }
 }
 
@@ -155,6 +67,14 @@ struct FontFace {
 }
 
 impl FontFace {
+    /// Build the face from the embedded font bytes. This is the only source of
+    /// font data — there is no filesystem fallback.
+    fn from_embedded() -> Option<FontFace> {
+        let bytes = EMBEDDED_FONT.to_vec();
+        let units_per_em = Face::parse(&bytes, 0).ok()?.units_per_em().max(1);
+        Some(FontFace::new(bytes, 0, units_per_em))
+    }
+
     fn new(data: Vec<u8>, index: u32, units_per_em: u16) -> Self {
         let ascii_advances = Face::parse(&data, index).ok().map(|parsed| {
             let mut advances = [0u16; 128];
@@ -255,89 +175,53 @@ impl FontFace {
     }
 }
 
-fn canonical_family_name(db: &Database, raw: &str) -> Option<String> {
-    db.faces()
-        .flat_map(|face| face.families.iter().map(|(family, _)| family))
-        .find(|family| family.eq_ignore_ascii_case(raw))
-        .cloned()
-}
-
-fn normalize_family_key(font_family: &str) -> String {
-    let trimmed = font_family.trim();
-    let family = if trimmed.is_empty() {
-        "sans-serif"
-    } else {
-        trimmed
-    };
-    format!("{FONT_CACHE_VERSION}:{family}")
-}
-
-fn cache_paths(family_key: &str) -> Option<(PathBuf, PathBuf)> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    family_key.hash(&mut hasher);
-    let hash = hasher.finish();
-    let dir = base.join("mmdr").join("font-cache");
-    let font_path = dir.join(format!("{hash:x}.font"));
-    let meta_path = dir.join(format!("{hash:x}.meta"));
-    Some((font_path, meta_path))
-}
-
-fn load_cached_face(family_key: &str) -> Option<FontFace> {
-    let (font_path, meta_path) = cache_paths(family_key)?;
-    if !font_path.exists() || !meta_path.exists() {
-        return None;
-    }
-    let bytes = fs::read(font_path).ok()?;
-    let index: u32 = fs::read_to_string(meta_path).ok()?.trim().parse().ok()?;
-    let face = Face::parse(&bytes, index).ok()?;
-    let units_per_em = face.units_per_em().max(1);
-    Some(FontFace::new(bytes, index, units_per_em))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fontdb::{FaceInfo, ID, Language, Source};
-    use std::sync::Arc;
-
-    fn push_family(db: &mut Database, family: &str) {
-        db.push_face_info(FaceInfo {
-            id: ID::dummy(),
-            source: Source::Binary(Arc::new(Vec::<u8>::new())),
-            index: 0,
-            families: vec![(family.to_string(), Language::English_UnitedStates)],
-            post_script_name: family.replace(' ', ""),
-            style: Style::Normal,
-            weight: Weight::NORMAL,
-            stretch: Stretch::Normal,
-            monospaced: false,
-        });
-    }
 
     #[test]
     fn measure_empty_text_is_zero() {
         assert_eq!(measure_text_width("", 16.0, "sans-serif"), Some(0.0));
     }
 
+    /// F1-AC6: the embedded face must produce a KNOWN advance, not merely a
+    /// non-zero one. "Hello" sums to 5191 font units in DejaVu Sans
+    /// (H=1540, e=1260, l=569, l=569, o=1253) at units_per_em=2048.
     #[test]
-    fn canonical_family_name_matches_case_insensitively() {
-        let mut db = Database::new();
-        push_family(&mut db, "Trebuchet MS");
-
-        assert_eq!(
-            canonical_family_name(&db, "trebuchet ms").as_deref(),
-            Some("Trebuchet MS")
-        );
+    fn measure_hello_matches_known_embedded_advance() {
+        const HELLO_UNITS: f32 = 5191.0;
+        const UPEM: f32 = 2048.0;
+        for font_size in [12.0_f32, 16.0, 32.0, 2048.0] {
+            let expected = HELLO_UNITS * font_size / UPEM;
+            let actual = measure_text_width("Hello", font_size, "sans-serif")
+                .expect("embedded face must measure");
+            assert!(
+                (actual - expected).abs() < 0.01,
+                "size {font_size}: expected {expected} px, got {actual} px"
+            );
+        }
     }
 
+    /// RMF1: every CSS family resolves to the single embedded face, so the
+    /// measured width is identical regardless of the requested family name.
     #[test]
-    fn normalize_family_key_uses_versioned_cache_namespace() {
-        assert_eq!(
-            normalize_family_key("trebuchet ms"),
-            "v2-font-family-case:trebuchet ms"
-        );
+    fn all_families_resolve_to_embedded_face() {
+        let reference = measure_text_width("Hello", 16.0, "sans-serif").unwrap();
+        for family in [
+            "Inter",
+            "'trebuchet ms'",
+            "verdana",
+            "arial",
+            "monospace",
+            "serif",
+            "Some Unknown Family",
+            "",
+        ] {
+            let width = measure_text_width("Hello", 16.0, family).unwrap();
+            assert!(
+                (width - reference).abs() < 0.001,
+                "family {family:?} measured {width}, expected {reference}"
+            );
+        }
     }
 }

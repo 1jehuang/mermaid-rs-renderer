@@ -92,6 +92,7 @@
 pub mod cli;
 pub mod config;
 mod edge_geometry;
+pub mod embedded_font;
 pub mod error;
 pub mod ir;
 pub mod layout;
