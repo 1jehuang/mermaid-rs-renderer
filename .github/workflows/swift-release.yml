@@ -1,0 +1,111 @@
+name: Swift Release
+
+# Release-driven tag flow for the MermaidRenderKit Swift package.
+#
+# Rust release builds are not bit-reproducible, so the xcframework checksum is
+# unknown until after the build. This workflow therefore builds first, stamps
+# Package.swift with the real url+checksum, commits that to the default branch,
+# and ONLY THEN tags the stamped commit — so the tag SwiftPM / the Swift Package
+# Index resolves always carries a valid manifest. After tagging, the placeholders
+# are restored on the branch HEAD.
+#
+# The tag is a plain `vX.Y.Z` (SemVer, SPM-resolvable), versioned independently
+# of the Rust crate: the crate follows its own 0.x line, the Swift package starts
+# at 1.0.0. The pushed tag does NOT trigger release.yml: a GITHUB_TOKEN push does
+# not start push-event workflows (anti-cascade), and even if it did, release.yml's
+# verify-tag-version guard fails on the version mismatch so no crate is published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      swift_version:
+        description: "Swift package version to release, e.g. 1.0.0 (>= 1.0.0, must differ from the Cargo crate version)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  swift-release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate version
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.swift_version }}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must be X.Y.Z, got: $VERSION"; exit 1
+          fi
+          MAJOR="$(echo "$VERSION" | cut -d. -f1)"
+          if [ "$MAJOR" -lt 1 ]; then
+            echo "::error::Swift package version must be >= 1.0.0 (the Cargo crate uses the 0.x range)"; exit 1
+          fi
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::tag v${VERSION} already exists"; exit 1
+          fi
+          CARGO_VERSION="$(awk -F'"' '/^version[[:space:]]*=/{print $2; exit}' Cargo.toml)"
+          if [ "$VERSION" = "$CARGO_VERSION" ]; then
+            echo "::error::Swift version $VERSION collides with the crate version $CARGO_VERSION"; exit 1
+          fi
+
+      - name: Save pre-stamp Package.swift
+        run: cp Package.swift "${RUNNER_TEMP}/Package.swift.pre-stamp"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version '^0.27' --locked
+
+      - name: Build xcframework (drift gate + 5 slices + zip)
+        run: ./scripts/build-xcframework.sh
+
+      - name: Compute checksum
+        id: sum
+        run: echo "checksum=$(swift package compute-checksum Artifacts/MermaidFFI.xcframework.zip)" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp Package.swift
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.swift_version }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/MermaidFFI.xcframework.zip"
+          CHECKSUM="${{ steps.sum.outputs.checksum }}"
+          python3 - "$URL" "$CHECKSUM" <<'PY'
+          import sys
+          url, checksum = sys.argv[1], sys.argv[2]
+          p = "Package.swift"; s = open(p).read()
+          s = s.replace("{{XCFRAMEWORK_URL}}", url).replace("{{XCFRAMEWORK_SHA}}", checksum)
+          open(p, "w").write(s)
+          PY
+          grep -q "$CHECKSUM" Package.swift || { echo "::error::stamp failed"; exit 1; }
+
+      - name: Commit, tag, release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.swift_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Package.swift
+          git commit -m "release: stamp Package.swift for MermaidRenderKit v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD
+          git push origin "v${VERSION}"
+          gh release create "v${VERSION}" \
+            Artifacts/MermaidFFI.xcframework.zip \
+            --title "MermaidRenderKit v${VERSION}" \
+            --notes "MermaidRenderKit Swift package v${VERSION}. SwiftPM: .package(url: \"https://github.com/${{ github.repository }}.git\", from: \"${VERSION}\")"
+
+      - name: Restore placeholders on branch HEAD
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/Package.swift.pre-stamp" Package.swift
+          git add Package.swift
+          git commit -m "chore: restore Package.swift placeholders after v${{ inputs.swift_version }}"
+          git push origin HEAD

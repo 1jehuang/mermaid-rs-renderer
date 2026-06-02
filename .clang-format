@@ -1,0 +1,9 @@
+# C formatting for the cbindgen-generated FFI header (ffi/include/mmdr.h).
+# Tuned so the raw cbindgen output is already compliant: the committed header
+# stays byte-identical to `cbindgen` output (the header-drift gate), while the
+# pre-commit clang-format check passes. ColumnLimit 0 keeps generated function
+# signatures on one line; SpacesBeforeTrailingComments 2 matches cbindgen's
+# `}  // extern "C"` style.
+BasedOnStyle: LLVM
+ColumnLimit: 0
+SpacesBeforeTrailingComments: 2

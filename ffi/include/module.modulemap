@@ -1,0 +1,4 @@
+module Cmmdr {
+    header "mmdr.h"
+    export *
+}

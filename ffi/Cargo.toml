@@ -1,0 +1,60 @@
+[package]
+name = "mermaid-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C-ABI FFI wrapper around mermaid-rs-renderer for the MarkdownExtendedView native renderer"
+license = "MIT"
+publish = false
+
+[lib]
+# staticlib: the artifact linked into the xcframework (Phases 4/5).
+# rlib: lets the crate's own unit/integration tests run on the host.
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# Non-default, NEVER shipped: exposes `mmdr_panic_probe`, a test-only entry
+# point that deliberately panics inside the render catch_unwind path so a
+# linked harness can prove the release+LTO+stripped staticlib maps a panic to
+# status 99 without aborting (PRD §4.3 N5). The five-slice matrix builds
+# WITHOUT this feature, and cbindgen runs without it, so the symbol never
+# enters a shipped slice or the committed header.
+panic_probe = []
+
+[dependencies]
+# Path dependency on the pinned fork submodule. The fork's `cli`/`clap` feature
+# is dropped (default-features = false); `png` stays enabled for the dual-format
+# render path (PRD D1) — it brings the resvg/usvg/fontdb raster stack and
+# exposes `embedded_font::get_font_database()` for the zero-fs PNG path.
+mermaid-rs-renderer = { path = "..", default-features = false, features = ["png"] }
+
+# Raster (PNG) path. We construct `usvg::Options` ourselves so we can apply the
+# three egress/zero-fs locks (PRD §4.7b / v7-MF1..3): a data:-only href
+# resolver, `resources_dir = None`, and the embedded-font `fontdb`. Pinned to
+# the SAME 0.47 line the fork links (so the fontdb 0.23 type unifies) and built
+# `default-features = false, features = ["text"]` so the `system-fonts` /
+# `memmap-fonts` features never enter the link graph (v7-MF1).
+resvg = { version = "0.47.0", default-features = false, features = ["text"] }
+usvg = { version = "0.47.0", default-features = false, features = ["text"] }
+fontdb = { version = "0.23", default-features = false, features = ["std"] }
+
+# Security floor for `regex` (pulled in transitively by the resvg/usvg text
+# stack). RUSTSEC-2022-0013: regex < 1.5.5 has a DoS via crafted patterns; we
+# never compile untrusted patterns, but the floor closes the advisory and is
+# enforced by `cargo audit` in CI. Upper bound keeps us on the audited 1.x line.
+regex = ">=1.5.5, <2"
+
+# NOTE on the release profile: this crate is a member of the workspace rooted at
+# `..`, and Cargo HONORS `[profile.*]` only from the workspace-root manifest — a
+# `[profile.release]` here would be silently ignored (and warned about). Placing
+# the xcframework's size/ABI knobs at the workspace root would instead pollute the
+# CORE crate's release build (the published `mmdr` CLI), trading away its headline
+# speed. So the knobs are applied per-invocation via environment in the
+# xcframework build (`scripts/build-xcframework.sh`), affecting ONLY that build:
+#   CARGO_PROFILE_RELEASE_OPT_LEVEL=z   CARGO_PROFILE_RELEASE_LTO=true
+#   CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=symbols
+#   CARGO_PROFILE_RELEASE_PANIC=unwind
+# `panic = "unwind"` is MANDATORY: every `extern "C"` body relies on
+# `catch_unwind`, which a `panic = "abort"` build silently turns into a no-op (UB
+# on a renderer panic). On Apple targets `unwind` is the default, so a plain
+# `cargo build` here remains correct for host tests; the env override makes the
+# guarantee explicit for the shipped slices (PRD §4.3 / §7).

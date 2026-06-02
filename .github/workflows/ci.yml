@@ -35,3 +35,98 @@ jobs:
             --all-features \
             --locked \
             --no-run
+
+  # Gates for the ffi/ C-ABI wrapper (the Swift package's binary layer). Runs on
+  # macOS because the header-drift gate uses clang-format and the wrapper targets
+  # Apple platforms. The wrapper is NOT swept by the `build` job above
+  # (default-members = ["."]), so it is built and tested explicitly here.
+  ffi-gate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cbindgen + clang-format header-drift gate
+        run: |
+          set -euo pipefail
+          cargo install cbindgen --version '^0.27' --locked
+          tmp="$(mktemp -d)/mmdr.h"
+          cbindgen --config ffi/cbindgen.toml --crate mermaid-ffi --output "$tmp" ffi
+          clang-format -i --style="file:${PWD}/.clang-format" "$tmp"
+          diff -u ffi/include/mmdr.h "$tmp" \
+            || { echo "::error::mmdr.h drift — run 'cbindgen ... | clang-format' (see ffi/cbindgen.toml) and bump abi_version if the layout changed"; exit 1; }
+
+      - name: Zero-filesystem-font feature gate
+        run: |
+          set -euo pipefail
+          # No system-font / fontconfig / memmap-font features may enter the
+          # ffi link graph (the renderer ships an embedded face for sandboxed iOS).
+          if cargo tree -p mermaid-ffi -e features --target aarch64-apple-ios 2>/dev/null \
+               | grep -iE 'system[-_]fonts|fontconfig|memmap[-_]fonts'; then
+            echo "::error::a filesystem/system-font feature is reachable from mermaid-ffi"; exit 1
+          fi
+          # resvg / usvg / fontdb must stay default-features = false.
+          for crate in resvg usvg fontdb; do
+            grep -E "^${crate} = \{[^}]*default-features = false" ffi/Cargo.toml \
+              || { echo "::error::${crate} must be default-features = false in ffi/Cargo.toml"; exit 1; }
+          done
+
+      - name: FFI tests + clippy
+        run: |
+          cargo test -p mermaid-ffi --all-targets --locked
+          cargo clippy -p mermaid-ffi --all-targets --locked -- -D warnings
+
+      - name: FFI cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+  # Build the Swift package against a locally-built xcframework and run its tests
+  # on macOS and the iOS simulator. The binaryTarget is swapped to a local path
+  # for CI only — Package.swift keeps its committed url:/checksum: form.
+  swift-test:
+    runs-on: macos-latest
+    needs: ffi-gate
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Headless import gate
+        run: |
+          set -euo pipefail
+          if grep -rnE 'import (SwiftUI|UIKit|AppKit|SVGView)' Sources/MermaidRenderKit; then
+            echo "::error::MermaidRenderKit must stay headless (no SwiftUI/UIKit/AppKit/SVGView)"; exit 1
+          fi
+
+      - name: Build local xcframework
+        run: |
+          cargo install cbindgen --version '^0.27' --locked
+          ./scripts/build-xcframework.sh
+
+      - name: Swap binaryTarget to local path (CI only)
+        run: |
+          set -euo pipefail
+          # Drop the url: line and turn the checksum: line into a path: line.
+          sed -i '' \
+            -e '/url: "{{XCFRAMEWORK_URL}}"/d' \
+            -e 's|checksum: "{{XCFRAMEWORK_SHA}}"|path: "Artifacts/MermaidFFI.xcframework"|' \
+            Package.swift
+          grep -q 'path: "Artifacts/MermaidFFI.xcframework"' Package.swift
+
+      - name: Swift build + test (macOS)
+        run: |
+          swift build
+          swift test
+
+      - name: Swift test (iOS simulator)
+        run: |
+          xcodebuild test \
+            -scheme MermaidRenderKit \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -skipPackagePluginValidation
