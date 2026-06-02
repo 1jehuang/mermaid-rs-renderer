@@ -34,7 +34,18 @@ exclude = [
     ".DS_Store",
     "*.png",
     "*.html",
+    # Swift package layer (additive, never part of the crates.io tarball).
+    "ffi/",
+    "Sources/",
+    "Tests/",
+    "Package.swift",
 ]
+
+# The `ffi/` C-ABI wrapper is a workspace member so it resolves against this
+# crate via a path dependency, but it is `publish = false` and excluded above —
+# it never reaches crates.io. The root remains the published `[package]`.
+[workspace]
+members = ["ffi"]
 
 [features]
 default = ["cli", "png"]
