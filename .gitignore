@@ -12,3 +12,7 @@ benchmark_table*.png
 /comparison/
 node_modules/
 tmp/
+
+# Swift package build products
+/.build
+/Artifacts

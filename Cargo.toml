@@ -35,9 +35,11 @@ exclude = [
     "*.png",
     "*.html",
     # Swift package layer (additive, never part of the crates.io tarball).
+    # The Swift test target uses `MermaidRenderKitTests/` (not `Tests/`) to
+    # avoid a case-insensitive collision with the Rust `tests/` directory.
     "ffi/",
     "Sources/",
-    "Tests/",
+    "MermaidRenderKitTests/",
     "Package.swift",
 ]
 
