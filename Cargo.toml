@@ -46,8 +46,14 @@ exclude = [
 # The `ffi/` C-ABI wrapper is a workspace member so it resolves against this
 # crate via a path dependency, but it is `publish = false` and excluded above —
 # it never reaches crates.io. The root remains the published `[package]`.
+#
+# `default-members = ["."]` keeps bare `cargo build/test/clippy/package` (no
+# `-p`/`--workspace`) operating on the root crate ONLY, so the existing CI
+# `build` job is unchanged by the workspace. The `ffi` member is built and
+# tested explicitly (`-p mermaid-ffi`) in its own macOS CI gate.
 [workspace]
 members = ["ffi"]
+default-members = ["."]
 
 [features]
 default = ["cli", "png"]
