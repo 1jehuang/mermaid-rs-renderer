@@ -3951,6 +3951,13 @@ struct C4Rect {
     height: f32,
 }
 
+/// Place each relationship's label to minimize collisions with the edge LINES
+/// (its own and every other), the node/boundary boxes, and other labels. For
+/// each label we generate candidates that slide ALONG its own routed line (so
+/// it can find an open stretch) crossed with small perpendicular offsets, score
+/// each against all obstacles, and keep the best. A few refinement sweeps then
+/// re-place every label against the others' final positions to undo the
+/// order-dependence of a single greedy pass.
 fn resolve_c4_rel_label_offsets(
     rels: &mut [C4RelLayout],
     shapes: &[C4ShapeLayout],
@@ -3960,10 +3967,9 @@ fn resolve_c4_rel_label_offsets(
     if rels.is_empty() {
         return;
     }
-    // Grow each shape by a clearance margin so a label that merely touches a
-    // box edge counts as overlapping and is pushed clear — labels should sit in
-    // open space, not jammed against a component.
-    let clr = 8.0f32;
+    // Node obstacles, grown by a small clearance so a label touching an edge of
+    // a box counts as overlapping and is pushed clear.
+    let clr = 6.0f32;
     let mut shape_obstacles: Vec<C4Rect> = shapes
         .iter()
         .map(|shape| C4Rect {
@@ -3973,8 +3979,6 @@ fn resolve_c4_rel_label_offsets(
             height: shape.height + 2.0 * clr,
         })
         .collect();
-    // Also keep labels off each boundary's title strip (the header band above
-    // its contents), where routed lines tend to converge.
     for b in boundaries {
         let header = b.label.height
             + b.boundary_type.as_ref().map(|t| t.height).unwrap_or(0.0)
@@ -3986,61 +3990,188 @@ fn resolve_c4_rel_label_offsets(
             height: header.min(b.height),
         });
     }
-    let mut placed_labels: Vec<C4Rect> = Vec::with_capacity(rels.len());
+
+    // All edge line segments (every relationship's routed polyline). Tagged
+    // with the owning rel index so a label can be told to ignore the central
+    // stretch of its OWN line (it's expected to sit on its own line).
+    struct Seg {
+        ri: usize,
+        a: (f32, f32),
+        b: (f32, f32),
+    }
+    let segments: Vec<Seg> = rels
+        .iter()
+        .enumerate()
+        .flat_map(|(ri, rel)| {
+            rel.points
+                .windows(2)
+                .map(move |w| Seg { ri, a: w[0], b: w[1] })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Per-rel: anchor point + tangent of its routed line, and its total length,
+    // so candidates can slide along it.
+    let anchors: Vec<((f32, f32), f32, f32, f32)> = rels
+        .iter()
+        .map(|rel| {
+            let (base, tx, ty) = c4_path_label_anchor(&rel.points, rel.start, rel.end);
+            let len: f32 = rel
+                .points
+                .windows(2)
+                .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
+                .sum();
+            (base, tx, ty, len)
+        })
+        .collect();
+
     let step = (conf.message_font_size * 1.2).max(10.0);
 
-    for rel in rels.iter_mut() {
-        // Anchor the label on the ACTUAL routed path (its polyline midpoint),
-        // not the straight start→end midpoint — the latter can fall inside the
-        // boundary or bunch many labels together when routed lines share a
-        // corridor. Use the local segment direction for the spread axes.
-        let (base, tangent_x, tangent_y) = c4_path_label_anchor(&rel.points, rel.start, rel.end);
-        let (normal_x, normal_y) = (-tangent_y, tangent_x);
+    // Score a candidate label rect for rel `ri`: heavy penalty for crossing any
+    // line (other than the immediate centre of its own line), node overlap,
+    // label-label overlap, plus a small pull toward its own line (displacement).
+    let score = |ri: usize,
+                 rect: &C4Rect,
+                 displacement: f32,
+                 placed: &[Option<C4Rect>],
+                 segments: &[Seg]|
+     -> f32 {
+        let node_overlap: f32 = shape_obstacles
+            .iter()
+            .map(|o| c4_rect_overlap_area(*rect, *o))
+            .sum();
+        let label_overlap: f32 = placed
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != ri)
+            .filter_map(|(_, r)| r.as_ref())
+            .map(|r| c4_rect_overlap_area(*rect, *r))
+            .sum();
+        // Count line crossings: how many edge segments pass through the rect.
+        // Skip the owning rel's own segments (a label is allowed to overlay its
+        // own line) — collisions with OTHER lines are what we minimize.
+        let mut line_hits = 0.0f32;
+        for s in segments {
+            if s.ri == ri {
+                continue;
+            }
+            if segment_intersects_rect(s.a, s.b, *rect) {
+                line_hits += 1.0;
+            }
+        }
+        // Node overlap is the worst (a label buried in a box is unreadable),
+        // then crossing other lines, then overlapping another label. The pull
+        // toward its own line is gentle so a label will travel a long way to
+        // reach open space if it must.
+        node_overlap * 30.0 + line_hits * 120.0 + label_overlap * 9.0 + displacement * 0.01
+    };
 
-        // The label's base center is the path anchor; offsets are measured
-        // relative to it. Record it so render reads the same anchor.
-        rel.label_base = base;
-
-        let mut candidates = Vec::with_capacity(96);
-        candidates.push((0.0, 0.0));
-        for ring in 1..=10 {
-            let dist = step * ring as f32;
-            for normal_sign in [-1.0f32, 1.0f32] {
-                candidates.push((normal_x * dist * normal_sign, normal_y * dist * normal_sign));
-                if ring <= 3 {
-                    for tangent_sign in [-1.0f32, 1.0f32] {
-                        let tangent_dist = dist * 0.75 * tangent_sign;
-                        candidates.push((
-                            normal_x * dist * normal_sign + tangent_x * tangent_dist,
-                            normal_y * dist * normal_sign + tangent_y * tangent_dist,
-                        ));
+    // Generate candidate (offset_from_anchor) deltas for rel ri: slide along the
+    // line (tangent) over its usable length, each crossed with perpendicular
+    // offsets on both sides. The perpendicular reach is large enough to escape
+    // past an adjacent component when the label's own line runs between two.
+    let candidates_for = |ri: usize| -> Vec<(f32, f32)> {
+        let (_, tx, ty, len) = anchors[ri];
+        let (nx, ny) = (-ty, tx);
+        let mut cands = vec![(0.0f32, 0.0f32)];
+        let reach = (len * 0.4).min(160.0);
+        let along_steps = 6;
+        for s in -along_steps..=along_steps {
+            let t = (s as f32 / along_steps as f32) * reach;
+            for ring in 0..=12 {
+                let dist = step * ring as f32;
+                for sign in [-1.0f32, 1.0f32] {
+                    cands.push((tx * t + nx * dist * sign, ty * t + ny * dist * sign));
+                    if ring == 0 {
+                        break; // only one zero-offset per along position
                     }
                 }
             }
         }
+        cands
+    };
 
+    let n = rels.len();
+    let mut placed: Vec<Option<C4Rect>> = vec![None; n];
+
+    // Set anchors first (render reads label_base).
+    for (ri, rel) in rels.iter_mut().enumerate() {
+        rel.label_base = anchors[ri].0;
+    }
+
+    // Initial greedy placement.
+    for ri in 0..n {
+        let cands = candidates_for(ri);
         let mut best_delta = (0.0f32, 0.0f32);
-        let mut best_rect = c4_rel_label_rect(rel, conf, (0.0, 0.0));
-        let mut best_score = c4_rel_label_score(&best_rect, &shape_obstacles, &placed_labels, 0.0);
-
-        for delta in candidates.into_iter().skip(1) {
-            let rect = c4_rel_label_rect(rel, conf, delta);
-            let displacement = (delta.0 * delta.0 + delta.1 * delta.1).sqrt();
-            let score = c4_rel_label_score(&rect, &shape_obstacles, &placed_labels, displacement);
-            if score < best_score {
-                best_score = score;
-                best_delta = delta;
+        let mut best_rect = c4_rel_label_rect(&rels[ri], conf, (0.0, 0.0));
+        let mut best_score =
+            score(ri, &best_rect, 0.0, &placed, &segments);
+        for d in cands.into_iter().skip(1) {
+            let rect = c4_rel_label_rect(&rels[ri], conf, d);
+            let disp = (d.0 * d.0 + d.1 * d.1).sqrt();
+            let s = score(ri, &rect, disp, &placed, &segments);
+            if s < best_score {
+                best_score = s;
+                best_delta = d;
                 best_rect = rect;
                 if best_score < 1e-3 {
                     break;
                 }
             }
         }
-
-        rel.offset_x += best_delta.0;
-        rel.offset_y += best_delta.1;
-        placed_labels.push(best_rect);
+        rels[ri].offset_x = best_delta.0;
+        rels[ri].offset_y = best_delta.1;
+        placed[ri] = Some(best_rect);
     }
+
+    // Refinement sweeps: re-place each label against everyone else's final
+    // positions, so a label placed early (against few neighbours) can improve
+    // once the full picture is known.
+    for _ in 0..3 {
+        let mut changed = false;
+        for ri in 0..n {
+            let cands = candidates_for(ri);
+            let mut best_delta = (rels[ri].offset_x, rels[ri].offset_y);
+            let cur_rect = c4_rel_label_rect(&rels[ri], conf, (0.0, 0.0));
+            let cur_disp = (best_delta.0 * best_delta.0 + best_delta.1 * best_delta.1).sqrt();
+            let mut best_score = score(ri, &cur_rect, cur_disp, &placed, &segments);
+            let mut best_rect = cur_rect;
+            for d in cands {
+                // d is relative to the anchor; the rect uses offset = d here.
+                let rect = c4_rel_label_rect_at(&rels[ri], conf, d);
+                let disp = (d.0 * d.0 + d.1 * d.1).sqrt();
+                let s = score(ri, &rect, disp, &placed, &segments);
+                if s + 1e-3 < best_score {
+                    best_score = s;
+                    best_delta = d;
+                    best_rect = rect;
+                }
+            }
+            if (best_delta.0 - rels[ri].offset_x).abs() > 0.5
+                || (best_delta.1 - rels[ri].offset_y).abs() > 0.5
+            {
+                rels[ri].offset_x = best_delta.0;
+                rels[ri].offset_y = best_delta.1;
+                placed[ri] = Some(best_rect);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Label rect with the offset set to an absolute value (not added to the
+/// existing offset) — for the refinement sweep which recomputes from scratch.
+fn c4_rel_label_rect_at(
+    rel: &C4RelLayout,
+    conf: &crate::config::C4Config,
+    offset: (f32, f32),
+) -> C4Rect {
+    let center_x = rel.label_base.0 + offset.0;
+    let center_y = rel.label_base.1 + offset.1;
+    c4_label_rect_at_center(rel, conf, center_x, center_y)
 }
 
 /// Midpoint of a routed polyline (by arc length) plus the unit tangent of the
@@ -4089,6 +4220,16 @@ fn c4_rel_label_rect(
 ) -> C4Rect {
     let center_x = rel.label_base.0 + rel.offset_x + delta.0;
     let center_y = rel.label_base.1 + rel.offset_y + delta.1;
+    c4_label_rect_at_center(rel, conf, center_x, center_y)
+}
+
+/// The bounding rect of a relationship's label+techn text centred at a point.
+fn c4_label_rect_at_center(
+    rel: &C4RelLayout,
+    conf: &crate::config::C4Config,
+    center_x: f32,
+    center_y: f32,
+) -> C4Rect {
     let primary_height = rel.label.height.max(conf.message_font_size);
     let secondary_height = rel
         .techn
@@ -4122,21 +4263,30 @@ fn c4_rel_label_rect(
     }
 }
 
-fn c4_rel_label_score(
-    rect: &C4Rect,
-    shape_obstacles: &[C4Rect],
-    placed_labels: &[C4Rect],
-    displacement: f32,
-) -> f32 {
-    let shape_overlap: f32 = shape_obstacles
-        .iter()
-        .map(|obstacle| c4_rect_overlap_area(*rect, *obstacle))
-        .sum();
-    let label_overlap: f32 = placed_labels
-        .iter()
-        .map(|placed| c4_rect_overlap_area(*rect, *placed))
-        .sum();
-    shape_overlap * 6.0 + label_overlap * 9.0 + displacement * 0.015
+/// True if segment a-b intersects (or lies within) rectangle `r`. Used to
+/// detect a label box sitting on top of an edge line.
+fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), r: C4Rect) -> bool {
+    let (rx, ry, rw, rh) = (r.x, r.y, r.width, r.height);
+    // endpoint inside?
+    let inside = |p: (f32, f32)| p.0 >= rx && p.0 <= rx + rw && p.1 >= ry && p.1 <= ry + rh;
+    if inside(a) || inside(b) {
+        return true;
+    }
+    // segment vs the four rect edges
+    let pa = Pt { x: a.0, y: a.1 };
+    let pb = Pt { x: b.0, y: b.1 };
+    let corners = [
+        Pt { x: rx, y: ry },
+        Pt { x: rx + rw, y: ry },
+        Pt { x: rx + rw, y: ry + rh },
+        Pt { x: rx, y: ry + rh },
+    ];
+    for i in 0..4 {
+        if segments_touch(pa, pb, corners[i], corners[(i + 1) % 4]) {
+            return true;
+        }
+    }
+    false
 }
 
 fn c4_rect_overlap_area(a: C4Rect, b: C4Rect) -> f32 {

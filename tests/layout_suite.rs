@@ -1411,3 +1411,44 @@ fn c4_shape_in_row_directive_is_honored() {
     assert!((ay - by).abs() < 1.0, "a and b should be on the same row");
     assert!(cy > ay + 1.0, "c should wrap to the next row");
 }
+
+#[test]
+fn c4_rel_labels_avoid_nodes_and_lines() {
+    // On a simple diagram, every relationship label should land clear of all
+    // node boxes (its text isn't buried in a component).
+    let input = r#"C4Container
+    title Label test
+    Person(u, "User", "x")
+    System(api, "API", "core")
+    SystemDb(db, "DB", "store")
+    System_Ext(ext, "Ext", "y")
+    Rel(u, api, "Uses")
+    Rel(api, db, "Reads/Writes")
+    Rel(api, ext, "Calls")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let config = LayoutConfig::default();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+    let DiagramData::C4(c4) = &layout.diagram else {
+        panic!("expected C4 layout");
+    };
+    let node_rects: Vec<(f32, f32, f32, f32)> = layout
+        .nodes
+        .values()
+        .map(|n| (n.x, n.y, n.width, n.height))
+        .collect();
+    for rel in &c4.rels {
+        // label center
+        let cx = rel.label_base.0 + rel.offset_x;
+        let cy = rel.label_base.1 + rel.offset_y;
+        for (nx, ny, nw, nh) in &node_rects {
+            let inside = cx > *nx && cx < nx + nw && cy > *ny && cy < ny + nh;
+            assert!(
+                !inside,
+                "label for {}->{} at ({cx},{cy}) is inside a node box",
+                rel.from, rel.to
+            );
+        }
+    }
+}
