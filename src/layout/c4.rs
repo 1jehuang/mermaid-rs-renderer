@@ -4047,23 +4047,48 @@ fn resolve_c4_rel_label_offsets(
             .filter_map(|(_, r)| r.as_ref())
             .map(|r| c4_rect_overlap_area(*rect, *r))
             .sum();
-        // Count line crossings: how many edge segments pass through the rect.
-        // Skip the owning rel's own segments (a label is allowed to overlay its
-        // own line) — collisions with OTHER lines are what we minimize.
-        let mut line_hits = 0.0f32;
+        // Line crossings, weighted by how badly they hurt readability. A
+        // HORIZONTAL segment running across a text line strikes through it
+        // (unreadable) — heavily penalized, and worst when it passes through the
+        // vertical middle of the label where the text sits. A VERTICAL segment
+        // passes between glyphs and is barely a problem — light penalty. (The
+        // label's own line is skipped; only OTHER edges count.)
+        let mut line_cost = 0.0f32;
+        let cx = rect.x + rect.width / 2.0;
+        let cy = rect.y + rect.height / 2.0;
         for s in segments {
-            if s.ri == ri {
+            if !segment_intersects_rect(s.a, s.b, *rect) {
                 continue;
             }
-            if segment_intersects_rect(s.a, s.b, *rect) {
-                line_hits += 1.0;
+            let horiz = (s.a.1 - s.b.1).abs() < 2.0;
+            let vert = (s.a.0 - s.b.0).abs() < 2.0;
+            let own = s.ri == ri;
+            if horiz {
+                // A horizontal line strikes through a text line — unreadable —
+                // worst at the label's vertical centre. This applies even to the
+                // label's OWN line: a label must sit ABOVE or BELOW its own
+                // horizontal run, never on it.
+                let seg_y = (s.a.1 + s.b.1) / 2.0;
+                let frac = 1.0 - ((seg_y - cy).abs() / (rect.height / 2.0 + 1.0)).min(1.0);
+                line_cost += 120.0 + 200.0 * frac;
+            } else if vert {
+                // A vertical line passes between glyphs and is readable. The
+                // label is allowed to overlay its OWN vertical run for free.
+                if own {
+                    continue;
+                }
+                let seg_x = (s.a.0 + s.b.0) / 2.0;
+                let frac = 1.0 - ((seg_x - cx).abs() / (rect.width / 2.0 + 1.0)).min(1.0);
+                line_cost += 8.0 + 12.0 * frac;
+            } else if !own {
+                line_cost += 60.0; // diagonal (rare in C4) — moderate
             }
         }
         // Node overlap is the worst (a label buried in a box is unreadable),
-        // then crossing other lines, then overlapping another label. The pull
-        // toward its own line is gentle so a label will travel a long way to
-        // reach open space if it must.
-        node_overlap * 30.0 + line_hits * 120.0 + label_overlap * 9.0 + displacement * 0.01
+        // then horizontal lines through the text, then overlapping another
+        // label. The pull toward its own line is gentle so a label will travel
+        // a long way to reach open space if it must.
+        node_overlap * 30.0 + line_cost + label_overlap * 9.0 + displacement * 0.01
     };
 
     // Generate candidate (offset_from_anchor) deltas for rel ri: slide along the
