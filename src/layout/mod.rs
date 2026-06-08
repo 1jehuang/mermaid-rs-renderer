@@ -26,6 +26,7 @@ mod xychart;
 use architecture::*;
 use block::*;
 use c4::*;
+pub use c4::{C4Quality, c4_arc_control, c4_layout_quality, c4_quality_for_layout};
 use error::*;
 use gantt::*;
 use gitgraph::*;

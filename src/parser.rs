@@ -3040,6 +3040,11 @@ fn parse_c4_diagram(input: &str) -> Result<ParseOutput> {
             graph.c4.c4_type = Some(line.trim().to_string());
             continue;
         }
+        // A `title ...` line is metadata, not a component. Skip it explicitly
+        // so prose containing parentheses isn't mis-parsed into a phantom shape.
+        if lower.starts_with("title ") || lower == "title" {
+            continue;
+        }
         if line == "}" || lower == "end" {
             if boundary_stack.len() > 1 {
                 boundary_stack.pop();
@@ -3343,16 +3348,19 @@ fn parse_function_call(line: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
     let func = trimmed[..open].trim();
+    // A real function name is a single identifier token. Prose that merely
+    // contains parentheses — e.g. `title Container Diagram (ShieldBench)` —
+    // has spaces in the part before `(` and must not be treated as a call
+    // (otherwise it would be mis-classified as a shape).
+    if func.is_empty() || func.chars().any(|c| c.is_whitespace()) {
+        return None;
+    }
     let args_str = &trimmed[open + 1..close];
     let args = split_args(args_str)
         .into_iter()
         .map(|arg| strip_quotes(arg.trim()))
         .collect();
-    if func.is_empty() {
-        None
-    } else {
-        Some((func.to_string(), args))
-    }
+    Some((func.to_string(), args))
 }
 
 fn split_args(input: &str) -> Vec<String> {
@@ -3396,9 +3404,11 @@ fn parse_c4_args(args: &[String]) -> (Vec<String>, std::collections::HashMap<Str
         let trimmed = arg.trim();
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim().trim_start_matches('$');
-            let value = value.trim();
+            // The value may still be quoted (e.g. `$c4ShapeInRow="2"`); strip
+            // surrounding quotes so numeric values parse.
+            let value = strip_quotes(value.trim());
             if !key.is_empty() {
-                kv.insert(key.to_string(), value.to_string());
+                kv.insert(key.to_string(), value);
                 continue;
             }
         }

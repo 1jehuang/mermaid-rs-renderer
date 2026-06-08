@@ -217,7 +217,7 @@ pub fn run() -> Result<()> {
 
         if args.timing {
             let total_us = parse_us + layout_us + render_us;
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "parse_us": parse_us,
                 "layout_us": layout_us,
                 "render_us": render_us,
@@ -229,6 +229,17 @@ pub fn run() -> Result<()> {
                     "total_us": layout_stages.total_us(),
                 }
             });
+            if let Some(q) = crate::layout::c4_quality_for_layout(&layout) {
+                payload["c4_quality"] = serde_json::json!({
+                    "score": q.score,
+                    "crossings": q.crossings,
+                    "box_hits": q.box_hits,
+                    "overlaps": q.overlaps,
+                    "bends": q.bends,
+                    "length": q.length,
+                    "area": q.area,
+                });
+            }
             eprintln!("{payload}");
         }
         return Ok(());

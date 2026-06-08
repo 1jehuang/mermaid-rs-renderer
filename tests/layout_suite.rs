@@ -971,3 +971,443 @@ fn sequence_alt_frame_geometry_matches_mermaid() {
         frame.y + frame.height
     );
 }
+
+/// Total straight-line length of all relationship arrows in a C4 layout.
+fn c4_total_rel_length(layout: &Layout) -> f32 {
+    layout
+        .edges
+        .iter()
+        .map(|e| {
+            e.points
+                .windows(2)
+                .map(|w| {
+                    let (ax, ay) = w[0];
+                    let (bx, by) = w[1];
+                    ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt()
+                })
+                .sum::<f32>()
+        })
+        .sum()
+}
+
+/// Externals are declared before the boundary (so row packing strands them in
+/// a top row far from the container they all connect to) and several of them
+/// fan into the same `api` container — the situation the force pass targets.
+const C4_EXTERNALS_AROUND_BOUNDARY: &str = r#"C4Container
+    title Force layout test
+
+    Person(dev, "Developer", "Builds things")
+    System_Ext(auth, "Auth Provider", "OIDC")
+    System_Ext(ai, "AI API", "LLM")
+    System_Ext(pay, "Payments", "Stripe")
+    System_Ext(mail, "Mail", "SES")
+
+    System_Boundary(sys, "The System") {
+        Container(spa, "Web SPA", "React", "UI")
+        Container(api, "API Server", "Rust", "Backend")
+        ContainerDb(db, "Database", "SQLite", "Storage")
+    }
+
+    Rel(dev, spa, "Uses")
+    Rel(spa, api, "Calls")
+    Rel(api, db, "Reads/writes")
+    Rel(api, auth, "Validates JWT")
+    Rel(api, ai, "Chats")
+    Rel(api, pay, "Charges")
+    Rel(api, mail, "Sends mail")
+"#;
+
+#[test]
+fn c4_force_layout_shortens_relationships() {
+    let parsed = parse_mermaid(C4_EXTERNALS_AROUND_BOUNDARY).unwrap();
+    let theme = Theme::modern();
+
+    let mut on = LayoutConfig::default();
+    on.c4.force_layout = true;
+    let layout_on = compute_layout(&parsed.graph, &theme, &on);
+
+    let mut off = LayoutConfig::default();
+    off.c4.force_layout = false;
+    let layout_off = compute_layout(&parsed.graph, &theme, &off);
+
+    let len_on = c4_total_rel_length(&layout_on);
+    let len_off = c4_total_rel_length(&layout_off);
+
+    assert!(
+        len_on < len_off,
+        "force layout should shorten total relationship length (on={len_on}, off={len_off})"
+    );
+}
+
+#[test]
+fn c4_force_layout_keeps_boundary_contents_rigid() {
+    let parsed = parse_mermaid(C4_EXTERNALS_AROUND_BOUNDARY).unwrap();
+    let theme = Theme::modern();
+
+    let mut off = LayoutConfig::default();
+    off.c4.force_layout = false;
+    let layout_off = compute_layout(&parsed.graph, &theme, &off);
+
+    let mut on = LayoutConfig::default();
+    on.c4.force_layout = true;
+    let layout_on = compute_layout(&parsed.graph, &theme, &on);
+
+    // The boundary moves as a rigid body: the relative offsets between its
+    // contained shapes must be identical with and without the force pass.
+    let rel_offset = |layout: &Layout, a: &str, b: &str| -> (f32, f32) {
+        let na = &layout.nodes[a];
+        let nb = &layout.nodes[b];
+        (nb.x - na.x, nb.y - na.y)
+    };
+    for (a, b) in [("spa", "api"), ("api", "db"), ("spa", "db")] {
+        let off_off = rel_offset(&layout_off, a, b);
+        let on_off = rel_offset(&layout_on, a, b);
+        assert!(
+            (off_off.0 - on_off.0).abs() < 0.5 && (off_off.1 - on_off.1).abs() < 0.5,
+            "boundary content {a}->{b} should keep its relative position \
+             (off={off_off:?}, on={on_off:?})"
+        );
+    }
+}
+
+#[test]
+fn c4_force_layout_never_lengthens_relationships() {
+    // A small, already-compact diagram: the force pass must not make it worse.
+    // The internal guard restores the row-packed placement when refinement
+    // wouldn't help, so the length is identical (within float noise).
+    let input = r#"C4Container
+    title Tidy
+    System_Boundary(sys, "Sys") {
+        Container(a, "A", "x", "")
+        Container(b, "B", "x", "")
+    }
+    Rel(a, b, "Calls")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+
+    let mut on = LayoutConfig::default();
+    on.c4.force_layout = true;
+    let len_on = c4_total_rel_length(&compute_layout(&parsed.graph, &theme, &on));
+
+    let mut off = LayoutConfig::default();
+    off.c4.force_layout = false;
+    let len_off = c4_total_rel_length(&compute_layout(&parsed.graph, &theme, &off));
+
+    assert!(
+        len_on <= len_off + 0.5,
+        "force layout must not lengthen relationships on a tidy diagram \
+         (on={len_on}, off={len_off})"
+    );
+}
+
+#[test]
+fn c4_grid_placement_and_routing_avoid_crossings_and_boxes() {
+    // Externals declared before the boundary that all fan into one container:
+    // grid placement should remove edge crossings and routing should keep
+    // every line clear of non-endpoint shape boxes.
+    let input = r#"C4Container
+    title Routing test
+    Person(dev, "Developer", "x")
+    System_Ext(a, "Auth", "x")
+    System_Ext(b, "AI", "x")
+    System_Ext(c, "Pay", "x")
+    System_Boundary(sys, "System") {
+        Container(spa, "SPA", "x", "")
+        Container(api, "API", "x", "")
+        ContainerDb(db, "DB", "x", "")
+    }
+    Rel(dev, spa, "Uses")
+    Rel(spa, api, "Calls")
+    Rel(api, db, "RW")
+    Rel(api, a, "Auth")
+    Rel(api, b, "Chat")
+    Rel(api, c, "Pay")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let config = LayoutConfig::default(); // grid + routing on by default
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+
+    // Box obstacles keyed by node id.
+    let boxes: Vec<(String, (f32, f32, f32, f32))> = layout
+        .nodes
+        .values()
+        .map(|n| (n.id.clone(), (n.x, n.y, n.width, n.height)))
+        .collect();
+
+    // No relationship segment may pass through a non-endpoint shape box.
+    for e in &layout.edges {
+        for w in e.points.windows(2) {
+            for (id, rect) in &boxes {
+                if *id == e.from || *id == e.to {
+                    continue;
+                }
+                // shrink the rect slightly so a line grazing the border or
+                // terminating at it doesn't count.
+                let inset = (rect.0 + 2.0, rect.1 + 2.0, rect.2 - 4.0, rect.3 - 4.0);
+                if inset.2 <= 0.0 || inset.3 <= 0.0 {
+                    continue;
+                }
+                assert!(
+                    !segment_intersects_rect(w[0], w[1], inset),
+                    "edge {}->{} passes through box {id}",
+                    e.from,
+                    e.to
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn c4_multiple_edges_on_one_shape_get_distinct_ports() {
+    // Several relationships all touch `hub`; their attachment points on hub
+    // must be distinct (not all the same border point) so each arrow reads
+    // separately.
+    let input = r#"C4Container
+    title Ports test
+    System(hub, "Hub", "core")
+    System_Ext(a, "A", "x")
+    System_Ext(b, "B", "x")
+    System_Ext(c, "C", "x")
+    System_Ext(d, "D", "x")
+    Rel(a, hub, "ra")
+    Rel(b, hub, "rb")
+    Rel(c, hub, "rc")
+    Rel(d, hub, "rd")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let config = LayoutConfig::default();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+
+    // Collect the endpoint that lands on `hub` for each edge.
+    let mut hub_points: Vec<(f32, f32)> = Vec::new();
+    for e in &layout.edges {
+        if e.from == "hub" {
+            hub_points.push(e.points[0]);
+        } else if e.to == "hub" {
+            hub_points.push(*e.points.last().unwrap());
+        }
+    }
+    assert!(hub_points.len() >= 2, "expected multiple edges on hub");
+    // No two attachment points should coincide.
+    for i in 0..hub_points.len() {
+        for j in (i + 1)..hub_points.len() {
+            let d = (hub_points[i].0 - hub_points[j].0).hypot(hub_points[i].1 - hub_points[j].1);
+            assert!(
+                d > 2.0,
+                "two edges share the same port on hub: {:?} vs {:?}",
+                hub_points[i],
+                hub_points[j]
+            );
+        }
+    }
+}
+
+#[test]
+fn c4_routed_lines_are_orthogonal_with_min_stub() {
+    let input = r#"C4Container
+    title Ortho test
+    Person(dev, "Dev", "x")
+    System_Ext(a, "A", "x")
+    System_Ext(b, "B", "x")
+    System_Boundary(sys, "Sys") {
+        Container(spa, "SPA", "x", "")
+        Container(api, "API", "x", "")
+        ContainerDb(db, "DB", "x", "")
+    }
+    Rel(dev, spa, "Uses")
+    Rel(spa, api, "Calls")
+    Rel(api, db, "RW")
+    Rel(api, a, "X")
+    Rel(api, b, "Y")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let mut config = LayoutConfig::default();
+    config.c4.rel_routing = "ortho".to_string(); // this test asserts ortho geometry
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+
+    for e in &layout.edges {
+        // Every segment must be axis-aligned (no diagonals).
+        for w in e.points.windows(2) {
+            let dx = (w[0].0 - w[1].0).abs();
+            let dy = (w[0].1 - w[1].1).abs();
+            assert!(
+                dx < 0.5 || dy < 0.5,
+                "edge {}->{} has a diagonal segment {:?}->{:?}",
+                e.from,
+                e.to,
+                w[0],
+                w[1]
+            );
+        }
+        // The first straight run leaving the source (sum of the leading
+        // colinear segments) must be at least ~3x the arrowhead (~30px).
+        if e.points.len() >= 2 {
+            let first_len = (e.points[0].0 - e.points[1].0).hypot(e.points[0].1 - e.points[1].1);
+            assert!(
+                first_len >= 28.0,
+                "edge {}->{} first stub too short: {first_len}",
+                e.from,
+                e.to
+            );
+        }
+    }
+}
+
+#[test]
+fn c4_arc_mode_curves_and_distinct_ports() {
+    // Arc mode: 2-point curved edges with distinct ports per shape side, and
+    // no edge crossings on a simple hub diagram (where ortho can tangle).
+    let input = r#"C4Container
+    title Arc test
+    System_Boundary(p, "Platform") {
+        System(api, "API", "core")
+        SystemDb(db, "DB", "store")
+        System(cache, "Cache", "redis")
+        System(queue, "Queue", "mq")
+    }
+    Rel(api, db, "Queries")
+    Rel(api, cache, "Caches")
+    Rel(api, queue, "Publishes")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let mut config = LayoutConfig::default();
+    config.c4.rel_routing = "arc".to_string();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+
+    let DiagramData::C4(c4) = &layout.diagram else {
+        panic!("expected C4 layout");
+    };
+    // Every relationship is a 2-point curved arc.
+    for rel in &c4.rels {
+        assert!(rel.curved, "arc mode rel {}->{} should be curved", rel.from, rel.to);
+        assert_eq!(
+            rel.points.len(),
+            2,
+            "arc rel {}->{} should have 2 points",
+            rel.from,
+            rel.to
+        );
+    }
+    // The three edges leaving `api` attach at distinct ports.
+    let api_ports: Vec<(f32, f32)> = c4
+        .rels
+        .iter()
+        .filter(|r| r.from == "api")
+        .map(|r| r.start)
+        .collect();
+    assert!(api_ports.len() >= 3);
+    for i in 0..api_ports.len() {
+        for j in (i + 1)..api_ports.len() {
+            let d =
+                (api_ports[i].0 - api_ports[j].0).hypot(api_ports[i].1 - api_ports[j].1);
+            assert!(d > 2.0, "api arcs share a port: {:?} {:?}", api_ports[i], api_ports[j]);
+        }
+    }
+}
+
+#[test]
+fn c4_auto_routing_picks_lowest_quality_score() {
+    use mermaid_rs_renderer::layout::c4_quality_for_layout;
+    // 'auto' must never score worse than any single mode it chooses among.
+    let input = r#"C4Container
+    title Auto test
+    System_Boundary(p, "Platform") {
+        System(api, "API", "core")
+        SystemDb(db, "DB", "store")
+        System(cache, "Cache", "redis")
+        System(queue, "Queue", "mq")
+    }
+    Rel(api, db, "Queries")
+    Rel(api, cache, "Caches")
+    Rel(api, queue, "Publishes")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+
+    let score_for = |mode: &str| -> f32 {
+        let mut config = LayoutConfig::default();
+        config.c4.rel_routing = mode.to_string();
+        let layout = compute_layout(&parsed.graph, &theme, &config);
+        c4_quality_for_layout(&layout).unwrap().score
+    };
+
+    let auto = score_for("auto");
+    let ortho = score_for("ortho");
+    let arc = score_for("arc");
+    let straight = score_for("straight");
+    let best = ortho.min(arc).min(straight);
+    assert!(
+        auto <= best + 1.0,
+        "auto ({auto}) should match the best single mode ({best}): \
+         ortho={ortho} arc={arc} straight={straight}"
+    );
+}
+
+#[test]
+fn c4_optimize_eliminates_box_hits_and_crossings() {
+    use mermaid_rs_renderer::layout::c4_quality_for_layout;
+    // A boundary with a container (desktop) that connects to others above it;
+    // with c4ShapeInRow=2 and optimize on, the internal reorder + annealing
+    // should reach 0 crossings and 0 lines-through-boxes.
+    let input = r#"C4Container
+    title Optimize test
+    System_Boundary(sys, "Sys") {
+        Container(spa, "SPA", "x", "")
+        Container(wasm, "WASM", "x", "")
+        Container(api, "API", "x", "")
+        ContainerDb(db, "DB", "x", "")
+        Container(desktop, "Desktop", "x", "")
+    }
+    System_Ext(a, "A", "x")
+    System_Ext(b, "B", "x")
+    Rel(spa, wasm, "loads")
+    Rel(spa, api, "calls")
+    Rel(api, db, "rw")
+    Rel(desktop, api, "spawns")
+    Rel(desktop, spa, "renders")
+    Rel(api, a, "x")
+    Rel(api, b, "y")
+    UpdateLayoutConfig($c4ShapeInRow="2")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let mut config = LayoutConfig::default();
+    config.c4.optimize = true;
+    config.c4.optimize_iterations = 600;
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+    let q = c4_quality_for_layout(&layout).unwrap();
+    assert_eq!(q.box_hits, 0, "optimize should remove lines through boxes");
+    assert_eq!(q.crossings, 0, "optimize should remove crossings");
+}
+
+#[test]
+fn c4_shape_in_row_directive_is_honored() {
+    // $c4ShapeInRow="2" must wrap the boundary's containers two per row
+    // (regression: the quoted value wasn't being parsed).
+    let input = r#"C4Container
+    System_Boundary(sys, "Sys") {
+        Container(a, "A", "x", "")
+        Container(b, "B", "x", "")
+        Container(c, "C", "x", "")
+        Container(d, "D", "x", "")
+    }
+    UpdateLayoutConfig($c4ShapeInRow="2")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    assert_eq!(parsed.graph.c4.c4_shape_in_row_override, Some(2));
+    let theme = Theme::modern();
+    let config = LayoutConfig::default();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+    // a and b should share a row (same y); c and d on the next row.
+    let ay = layout.nodes["a"].y;
+    let by = layout.nodes["b"].y;
+    let cy = layout.nodes["c"].y;
+    assert!((ay - by).abs() < 1.0, "a and b should be on the same row");
+    assert!(cy > ay + 1.0, "c should wrap to the next row");
+}

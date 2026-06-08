@@ -4497,8 +4497,8 @@ fn render_c4(c4: &C4Layout, config: &LayoutConfig) -> String {
     svg.push_str("<defs><marker id=\"filled-head\" refX=\"18\" refY=\"7\" markerWidth=\"20\" markerHeight=\"28\" orient=\"auto\"><path d=\"M 18,7 L9,13 L14,7 L9,1 Z\"/></marker></defs>");
 
     svg.push_str("<g>");
-    for (idx, rel) in c4.rels.iter().enumerate() {
-        svg.push_str(&render_c4_rel(rel, conf, idx == 0));
+    for rel in c4.rels.iter() {
+        svg.push_str(&render_c4_rel(rel, conf));
     }
     svg.push_str("</g>");
 
@@ -4752,10 +4752,22 @@ fn render_c4_boundary(boundary: &C4BoundaryLayout, conf: &crate::config::C4Confi
     svg
 }
 
-fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bool) -> String {
+fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
     let mut svg = String::new();
     let stroke = rel.line_color.as_deref().unwrap_or(&conf.boundary_stroke);
-    if straight {
+    let stroke_width = conf.rel_stroke_width;
+
+    // Routed orthogonal polyline (3+ points): draw it directly and return.
+    // Rounded joins keep the corners tidy; markers go on the matching ends.
+    if rel.points.len() > 2 {
+        let mut d = String::new();
+        for (i, (px, py)) in rel.points.iter().enumerate() {
+            if i == 0 {
+                d.push_str(&format!("M{px:.2},{py:.2}"));
+            } else {
+                d.push_str(&format!(" L{px:.2},{py:.2}"));
+            }
+        }
         let mut attrs = String::new();
         if rel.kind != crate::ir::C4RelKind::RelBack {
             attrs.push_str(" marker-end=\"url(#arrowhead)\"");
@@ -4767,7 +4779,52 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
             attrs.push_str(" marker-start=\"url(#arrowend)\"");
         }
         svg.push_str(&format!(
-            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke-width=\"1\" stroke=\"{}\" style=\"fill: none;\"{attrs} />",
+            "<path fill=\"none\" stroke-width=\"{stroke_width}\" stroke=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\" d=\"{d}\"{attrs} />",
+            escape_xml(stroke),
+        ));
+        // Label anchored at the routed path's midpoint plus its resolved
+        // collision-avoidance offset.
+        let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
+        let mid_x = rel.label_base.0 + rel.offset_x;
+        let mid_y = rel.label_base.1 + rel.offset_y;
+        svg.push_str(&c4_text_svg(
+            mid_x,
+            mid_y,
+            &rel.label.lines,
+            &conf.message_font_family,
+            conf.message_font_size,
+            &conf.message_font_weight,
+            text_color,
+            false,
+        ));
+        if let Some(techn) = &rel.techn {
+            svg.push_str(&c4_text_svg(
+                mid_x,
+                mid_y + conf.message_font_size + 5.0,
+                &techn.lines,
+                &conf.message_font_family,
+                conf.message_font_size,
+                &conf.message_font_weight,
+                text_color,
+                true,
+            ));
+        }
+        return svg;
+    }
+
+    if !rel.curved {
+        let mut attrs = String::new();
+        if rel.kind != crate::ir::C4RelKind::RelBack {
+            attrs.push_str(" marker-end=\"url(#arrowhead)\"");
+        }
+        if matches!(
+            rel.kind,
+            crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack
+        ) {
+            attrs.push_str(" marker-start=\"url(#arrowend)\"");
+        }
+        svg.push_str(&format!(
+            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke-width=\"{stroke_width}\" stroke=\"{}\" style=\"fill: none;\"{attrs} />",
             rel.start.0,
             rel.start.1,
             rel.end.0,
@@ -4775,10 +4832,13 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
             escape_xml(stroke),
         ));
     } else {
-        let control_x = rel.start.0 + (rel.end.0 - rel.start.0) / 4.0;
-        let control_y = rel.start.1 + (rel.end.1 - rel.start.1) / 2.0;
+        // Bow the curve perpendicular to the chord (shared with the quality
+        // scorer so both agree on the drawn geometry), so sibling arcs between
+        // the same boxes fan apart and read distinctly.
+        let (control_x, control_y) =
+            crate::layout::c4_arc_control(rel.start, rel.end, rel.bow);
         let mut path = format!(
-            "<path fill=\"none\" stroke-width=\"1\" stroke=\"{}\" d=\"M{:.2},{:.2} Q{:.2},{:.2} {:.2},{:.2}\"",
+            "<path fill=\"none\" stroke-width=\"{stroke_width}\" stroke=\"{}\" d=\"M{:.2},{:.2} Q{:.2},{:.2} {:.2},{:.2}\"",
             escape_xml(stroke),
             rel.start.0,
             rel.start.1,
@@ -4801,8 +4861,8 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
     }
 
     let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
-    let mid_x = rel.start.0.min(rel.end.0) + (rel.start.0 - rel.end.0).abs() / 2.0 + rel.offset_x;
-    let mid_y = rel.start.1.min(rel.end.1) + (rel.start.1 - rel.end.1).abs() / 2.0 + rel.offset_y;
+    let mid_x = rel.label_base.0 + rel.offset_x;
+    let mid_y = rel.label_base.1 + rel.offset_y;
     svg.push_str(&c4_text_svg(
         mid_x,
         mid_y,
