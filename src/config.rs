@@ -499,7 +499,7 @@ impl Default for C4Config {
             use_max_width: true,
             diagram_margin_x: 32.0,
             diagram_margin_y: 8.0,
-            c4_shape_margin: 40.0,
+            c4_shape_margin: 56.0,
             c4_shape_padding: 24.0,
             width: 200.0,
             height: 56.0,
