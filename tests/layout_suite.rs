@@ -1387,6 +1387,64 @@ fn c4_optimize_eliminates_box_hits_and_crossings() {
 }
 
 #[test]
+fn c4_none_routing_reattaches_edges_after_anneal() {
+    // Regression: with relRouting="none" AND optimize on, the annealing pass
+    // moves shapes around. The "none" branch must recompute each edge's
+    // endpoints from the CURRENT shape positions; otherwise the drawn lines stay
+    // anchored where the boxes used to be and float away from them. We assert
+    // every relationship's start and end sit on some shape's border.
+    let input = r#"C4Container
+    title None routing test
+    System(a, "A", "x")
+    System(b, "B", "y")
+    System(c, "C", "z")
+    System(d, "D", "w")
+    Rel(a, b, "r1")
+    Rel(b, c, "r2")
+    Rel(c, d, "r3")
+    Rel(a, d, "r4")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let mut config = LayoutConfig::default();
+    config.c4.optimize = true;
+    config.c4.optimize_iterations = 200;
+    config.c4.rel_routing = "none".to_string();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+
+    let DiagramData::C4(c4) = &layout.diagram else {
+        panic!("expected C4 layout");
+    };
+    let boxes: Vec<(f32, f32, f32, f32)> = c4
+        .shapes
+        .iter()
+        .map(|s| (s.x, s.y, s.width, s.height))
+        .collect();
+    let on_any_border = |p: (f32, f32)| -> bool {
+        let eps = 2.5;
+        boxes.iter().any(|&(x, y, w, h)| {
+            let on_x = (p.0 - x).abs() < eps || (p.0 - (x + w)).abs() < eps;
+            let on_y = (p.1 - y).abs() < eps || (p.1 - (y + h)).abs() < eps;
+            let in_x = p.0 >= x - eps && p.0 <= x + w + eps;
+            let in_y = p.1 >= y - eps && p.1 <= y + h + eps;
+            (on_x && in_y) || (on_y && in_x)
+        })
+    };
+    for rel in &c4.rels {
+        assert!(
+            on_any_border(rel.start),
+            "none-mode edge {}->{} start {:?} detached from all boxes after anneal",
+            rel.from, rel.to, rel.start
+        );
+        assert!(
+            on_any_border(rel.end),
+            "none-mode edge {}->{} end {:?} detached from all boxes after anneal",
+            rel.from, rel.to, rel.end
+        );
+    }
+}
+
+#[test]
 fn c4_shape_in_row_directive_is_honored() {
     // $c4ShapeInRow="2" must wrap the boundary's containers two per row
     // (regression: the quoted value wasn't being parsed).
@@ -1451,4 +1509,80 @@ fn c4_rel_labels_avoid_nodes_and_lines() {
             );
         }
     }
+}
+
+#[test]
+fn c4_rel_label_drawn_at_scored_center() {
+    // Regression: a relationship label must be DRAWN centred on the very anchor
+    // the layout scorer placed it at (`rel.label_base + offset`), not anchored
+    // by its top. Top-anchoring shifts the block down by half its height — more
+    // for multi-line labels — pushing the visible text off the collision-checked
+    // spot. We assert the drawn primary-label block's vertical centre equals the
+    // scored anchor's y.
+    let input = r#"C4Container
+    title Anchor test
+    System(a, "A", "x")
+    System(b, "B", "y")
+    Rel(a, b, "Sends events to the other system here", "HTTPS/JSON")
+"#;
+    let parsed = parse_mermaid(input).unwrap();
+    let theme = Theme::modern();
+    let config = LayoutConfig::default();
+    let layout = compute_layout(&parsed.graph, &theme, &config);
+    let svg = render_svg(&layout, &theme, &config);
+
+    let DiagramData::C4(c4) = &layout.diagram else {
+        panic!("expected C4 layout");
+    };
+    let rel = c4
+        .rels
+        .iter()
+        .find(|r| r.from == "a" && r.to == "b")
+        .expect("a->b rel missing");
+    // The anchor the scorer used to place the label's rect.
+    let scored_center_y = rel.label_base.1 + rel.offset_y;
+    let n_lines = rel.label.lines.len().max(1) as f32;
+
+    // Collect each drawn line's absolute centre (text y + tspan dy), keyed by
+    // text content, then reconstruct the primary block's centre as the mean of
+    // its line centres (a top- vs centre-anchored block differ by half height).
+    let mut line_centers: Vec<f32> = Vec::new();
+    for chunk in svg.split("<text ").skip(1) {
+        let Some(y) = attr_f32(chunk, "y=\"") else {
+            continue;
+        };
+        let Some(dy_pos) = chunk.find("dy=\"") else {
+            continue;
+        };
+        let dy = attr_f32(&chunk[dy_pos..], "dy=\"").unwrap_or(0.0);
+        let after = &chunk[dy_pos..];
+        let Some(gt) = after.find('>') else { continue };
+        let Some(end) = after[gt + 1..].find("</tspan>") else {
+            continue;
+        };
+        let text = &after[gt + 1..gt + 1 + end];
+        if text.contains("Sends events") || text.contains("other system") {
+            line_centers.push(y + dy);
+        }
+    }
+    assert_eq!(
+        line_centers.len() as f32, n_lines,
+        "expected {n_lines} primary-label lines drawn, found {}",
+        line_centers.len()
+    );
+    let drawn_center_y = line_centers.iter().sum::<f32>() / line_centers.len() as f32;
+
+    assert!(
+        (drawn_center_y - scored_center_y).abs() < 1.0,
+        "primary label drawn centre {drawn_center_y} should match scored anchor \
+         {scored_center_y}; a top-anchored render shifts it down ~{} px",
+        12.0 * n_lines / 2.0
+    );
+}
+
+/// Parse the float value of the first occurrence of `key` (e.g. `y=\"`) in `s`.
+fn attr_f32(s: &str, key: &str) -> Option<f32> {
+    let start = s.find(key)? + key.len();
+    let end = s[start..].find('"')? + start;
+    s[start..end].parse::<f32>().ok()
 }

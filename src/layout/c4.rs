@@ -2275,6 +2275,53 @@ fn apply_path(rel: &mut C4RelLayout, path: &[Pt]) {
     );
 }
 
+/// "Route" with no routing: recompute each edge as a straight border-to-border
+/// line from the CURRENT shape positions. `base_rels` carry endpoints from the
+/// pre-anneal layout, so without this the lines would stay anchored to where the
+/// boxes used to be after annealing moves them. Endpoints are clipped to the box
+/// borders (toward the other box's centre) so arrows meet the shapes cleanly.
+fn route_c4_rels_none(
+    rels: &mut [C4RelLayout],
+    shapes: &[C4ShapeLayout],
+    _conf: &crate::config::C4Config,
+) {
+    if rels.is_empty() {
+        return;
+    }
+    let id_to_idx: std::collections::HashMap<&str, usize> = shapes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    for rel in rels.iter_mut() {
+        let (Some(&fi), Some(&ti)) = (
+            id_to_idx.get(rel.from.as_str()),
+            id_to_idx.get(rel.to.as_str()),
+        ) else {
+            continue;
+        };
+        let fb = Box {
+            x: shapes[fi].x,
+            y: shapes[fi].y,
+            w: shapes[fi].width,
+            h: shapes[fi].height,
+        };
+        let tb = Box {
+            x: shapes[ti].x,
+            y: shapes[ti].y,
+            w: shapes[ti].width,
+            h: shapes[ti].height,
+        };
+        let s = box_border_point(fb, tb.center());
+        let e = box_border_point(tb, fb.center());
+        rel.start = (s.x, s.y);
+        rel.end = (e.x, e.y);
+        rel.points = vec![(s.x, s.y), (e.x, e.y)];
+        rel.curved = false;
+        rel.label_base = ((s.x + e.x) / 2.0, (s.y + e.y) / 2.0);
+    }
+}
+
 /// Route `base_rels` (un-routed, 2-point center lines) over `shapes` using the
 /// configured mode — for `"auto"`, try ortho/arc/straight and keep the lowest
 /// quality score. Returns the routed rels and their score. Reused by the
@@ -2289,7 +2336,7 @@ fn route_and_score_c4(
     let apply_mode = |mode: &str| -> Vec<C4RelLayout> {
         let mut r = base_rels.to_vec();
         match mode {
-            "none" => {}
+            "none" => route_c4_rels_none(&mut r, shapes, conf),
             "arc" => route_c4_rels_arc(&mut r, shapes, conf, true),
             "straight" => route_c4_rels_arc(&mut r, shapes, conf, false),
             _ => route_c4_rels(&mut r, shapes, conf),

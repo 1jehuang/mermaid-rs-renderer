@@ -4785,9 +4785,11 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
         // Label anchored at the routed path's midpoint plus its resolved
         // collision-avoidance offset.
         let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
+        // `mid_y` is the label's CENTRE (the anchor the scorer placed). Draw
+        // centred there so the text matches the collision-checked rectangle.
         let mid_x = rel.label_base.0 + rel.offset_x;
         let mid_y = rel.label_base.1 + rel.offset_y;
-        svg.push_str(&c4_text_svg(
+        svg.push_str(&c4_text_svg_centered(
             mid_x,
             mid_y,
             &rel.label.lines,
@@ -4798,7 +4800,7 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
             false,
         ));
         if let Some(techn) = &rel.techn {
-            svg.push_str(&c4_text_svg(
+            svg.push_str(&c4_text_svg_centered(
                 mid_x,
                 mid_y + conf.message_font_size + 5.0,
                 &techn.lines,
@@ -4861,9 +4863,11 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
     }
 
     let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
+    // `mid_y` is the label's CENTRE (the anchor the scorer placed). Draw centred
+    // there so the text matches the collision-checked rectangle.
     let mid_x = rel.label_base.0 + rel.offset_x;
     let mid_y = rel.label_base.1 + rel.offset_y;
-    svg.push_str(&c4_text_svg(
+    svg.push_str(&c4_text_svg_centered(
         mid_x,
         mid_y,
         &rel.label.lines,
@@ -4874,7 +4878,7 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
         false,
     ));
     if let Some(techn) = &rel.techn {
-        svg.push_str(&c4_text_svg(
+        svg.push_str(&c4_text_svg_centered(
             mid_x,
             mid_y + conf.message_font_size + 5.0,
             &techn.lines,
@@ -4904,6 +4908,28 @@ fn c4_text_svg(
     // space instead of being centred on `y` and overflowing upward into the
     // title/tech text above it.
     c4_text_svg_top(x, y, lines, font_family, font_size, font_size, font_weight, fill, italic)
+}
+
+/// Like `c4_text_svg` but `cy` is the vertical CENTRE of the text block, not its
+/// top. Used for relationship labels: the layout scorer
+/// (`c4_label_rect_at_center`) places the label's rect centred on the resolved
+/// anchor, so the drawn text must be centred there too — otherwise multi-line
+/// labels drift downward off the collision-checked spot (one line slot is
+/// `font_size`, so a block of N lines is `font_size * N` tall).
+#[allow(clippy::too_many_arguments)]
+fn c4_text_svg_centered(
+    x: f32,
+    cy: f32,
+    lines: &[String],
+    font_family: &str,
+    font_size: f32,
+    font_weight: &str,
+    fill: &str,
+    italic: bool,
+) -> String {
+    let block_height = font_size * lines.len().max(1) as f32;
+    let top = cy - block_height / 2.0;
+    c4_text_svg_top(x, top, lines, font_family, font_size, font_size, font_weight, fill, italic)
 }
 
 /// Like `c4_text_svg` but with an explicit line height (slot pitch) for even
@@ -5781,14 +5807,20 @@ pub fn write_output_png(
 
     opt.fontdb_mut().load_system_fonts();
 
-    // Render at the diagram's natural aspect ratio (the viewBox), not the SVG
-    // root width/height — those may be a fixed 1200x800 from the CLI, which
-    // would squash a tall diagram. Rewrite the root width/height to the viewBox
-    // size so usvg renders undistorted, then supersample by `scale` for a sharp,
-    // genuinely high-resolution raster.
+    // Pick the base raster size (before supersampling). The diagram's true
+    // aspect ratio is the viewBox; the requested width/height (CLI/config) is a
+    // bounding box. Fit the viewBox INSIDE that box preserving aspect ratio, so
+    // we honor the requested dimensions without ever squashing a tall diagram
+    // into a wide frame (the original distortion bug). Then rewrite the SVG root
+    // to that fitted size so usvg rasterizes undistorted, and supersample by
+    // `scale` for a sharp, high-resolution raster.
     let scale = render_cfg.scale.clamp(1.0, 8.0);
     let svg = match parse_svg_viewbox_size(svg) {
-        Some((vb_w, vb_h)) => rewrite_svg_root_size(svg, vb_w, vb_h),
+        Some((vb_w, vb_h)) => {
+            let (fit_w, fit_h) =
+                fit_within(vb_w, vb_h, render_cfg.width, render_cfg.height);
+            rewrite_svg_root_size(svg, fit_w, fit_h)
+        }
         None => svg.to_string(),
     };
 
@@ -5819,6 +5851,19 @@ fn escape_xml(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+/// Scale (content_w, content_h) to fit inside the bounding box (box_w, box_h),
+/// preserving aspect ratio (letterbox). The result has the content's aspect
+/// ratio and touches at least one side of the box. If the bounding box is
+/// degenerate, the content size is returned unchanged so we never distort.
+#[cfg(feature = "png")]
+fn fit_within(content_w: f32, content_h: f32, box_w: f32, box_h: f32) -> (f32, f32) {
+    if content_w <= 0.0 || content_h <= 0.0 || box_w <= 0.0 || box_h <= 0.0 {
+        return (content_w.max(1.0), content_h.max(1.0));
+    }
+    let s = (box_w / content_w).min(box_h / content_h);
+    ((content_w * s).max(1.0), (content_h * s).max(1.0))
 }
 
 /// Extract the (width, height) of the SVG's viewBox from the root element, so
