@@ -4898,10 +4898,32 @@ fn c4_text_svg(
     fill: &str,
     italic: bool,
 ) -> String {
+    // `y` is the TOP of the text block (matching the layout, which advances by
+    // the block height). Lay lines out DOWNWARD from there, each centred in its
+    // own line slot — so a multi-line description grows down into the box's open
+    // space instead of being centred on `y` and overflowing upward into the
+    // title/tech text above it.
+    c4_text_svg_top(x, y, lines, font_family, font_size, font_size, font_weight, fill, italic)
+}
+
+/// Like `c4_text_svg` but with an explicit line height (slot pitch) for even
+/// vertical spacing.
+#[allow(clippy::too_many_arguments)]
+fn c4_text_svg_top(
+    x: f32,
+    y: f32,
+    lines: &[String],
+    font_family: &str,
+    font_size: f32,
+    line_height: f32,
+    font_weight: &str,
+    fill: &str,
+    italic: bool,
+) -> String {
     let mut out = String::new();
-    let line_count = lines.len() as f32;
     for (idx, line) in lines.iter().enumerate() {
-        let dy = idx as f32 * font_size - font_size * (line_count - 1.0) / 2.0;
+        // centre of line `idx`, measured from the block top `y`.
+        let dy = line_height * (idx as f32 + 0.5);
         out.push_str(&format!(
             "<text x=\"{x:.2}\" y=\"{y:.2}\" dominant-baseline=\"middle\" fill=\"{}\" style=\"text-anchor: middle; font-size: {}px; font-weight: {}; font-family: {}\"{}><tspan dy=\"{dy:.2}\" alignment-baseline=\"mathematical\">{}</tspan></text>",
             escape_xml(fill),
