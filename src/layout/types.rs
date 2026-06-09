@@ -538,6 +538,20 @@ pub struct C4RelLayout {
     pub techn: Option<C4TextLayout>,
     pub start: (f32, f32),
     pub end: (f32, f32),
+    /// Routed polyline from `start` to `end` (inclusive). When it has more
+    /// than two points the relationship is drawn as an orthogonal path that
+    /// avoids intervening shapes; otherwise it falls back to the straight
+    /// `start`→`end` line.
+    pub points: Vec<(f32, f32)>,
+    /// Base anchor for the label: the midpoint of the routed path. The drawn
+    /// label center is `label_base + (offset_x, offset_y)`.
+    pub label_base: (f32, f32),
+    /// Draw the line as a smooth curve through `points` rather than straight
+    /// segments. Set by the `"arc"` routing mode.
+    pub curved: bool,
+    /// Perpendicular bow distance for a curved arc, sized so the drawn bezier
+    /// clears any box between its endpoints. 0 = use the default bow.
+    pub bow: f32,
     pub offset_x: f32,
     pub offset_y: f32,
     pub line_color: Option<String>,

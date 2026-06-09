@@ -4497,8 +4497,8 @@ fn render_c4(c4: &C4Layout, config: &LayoutConfig) -> String {
     svg.push_str("<defs><marker id=\"filled-head\" refX=\"18\" refY=\"7\" markerWidth=\"20\" markerHeight=\"28\" orient=\"auto\"><path d=\"M 18,7 L9,13 L14,7 L9,1 Z\"/></marker></defs>");
 
     svg.push_str("<g>");
-    for (idx, rel) in c4.rels.iter().enumerate() {
-        svg.push_str(&render_c4_rel(rel, conf, idx == 0));
+    for rel in c4.rels.iter() {
+        svg.push_str(&render_c4_rel(rel, conf));
     }
     svg.push_str("</g>");
 
@@ -4752,10 +4752,22 @@ fn render_c4_boundary(boundary: &C4BoundaryLayout, conf: &crate::config::C4Confi
     svg
 }
 
-fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bool) -> String {
+fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config) -> String {
     let mut svg = String::new();
     let stroke = rel.line_color.as_deref().unwrap_or(&conf.boundary_stroke);
-    if straight {
+    let stroke_width = conf.rel_stroke_width;
+
+    // Routed orthogonal polyline (3+ points): draw it directly and return.
+    // Rounded joins keep the corners tidy; markers go on the matching ends.
+    if rel.points.len() > 2 {
+        let mut d = String::new();
+        for (i, (px, py)) in rel.points.iter().enumerate() {
+            if i == 0 {
+                d.push_str(&format!("M{px:.2},{py:.2}"));
+            } else {
+                d.push_str(&format!(" L{px:.2},{py:.2}"));
+            }
+        }
         let mut attrs = String::new();
         if rel.kind != crate::ir::C4RelKind::RelBack {
             attrs.push_str(" marker-end=\"url(#arrowhead)\"");
@@ -4767,7 +4779,54 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
             attrs.push_str(" marker-start=\"url(#arrowend)\"");
         }
         svg.push_str(&format!(
-            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke-width=\"1\" stroke=\"{}\" style=\"fill: none;\"{attrs} />",
+            "<path fill=\"none\" stroke-width=\"{stroke_width}\" stroke=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\" d=\"{d}\"{attrs} />",
+            escape_xml(stroke),
+        ));
+        // Label anchored at the routed path's midpoint plus its resolved
+        // collision-avoidance offset.
+        let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
+        // `mid_y` is the label's CENTRE (the anchor the scorer placed). Draw
+        // centred there so the text matches the collision-checked rectangle.
+        let mid_x = rel.label_base.0 + rel.offset_x;
+        let mid_y = rel.label_base.1 + rel.offset_y;
+        svg.push_str(&c4_text_svg_centered(
+            mid_x,
+            mid_y,
+            &rel.label.lines,
+            &conf.message_font_family,
+            conf.message_font_size,
+            &conf.message_font_weight,
+            text_color,
+            false,
+        ));
+        if let Some(techn) = &rel.techn {
+            svg.push_str(&c4_text_svg_centered(
+                mid_x,
+                mid_y + conf.message_font_size + 5.0,
+                &techn.lines,
+                &conf.message_font_family,
+                conf.message_font_size,
+                &conf.message_font_weight,
+                text_color,
+                true,
+            ));
+        }
+        return svg;
+    }
+
+    if !rel.curved {
+        let mut attrs = String::new();
+        if rel.kind != crate::ir::C4RelKind::RelBack {
+            attrs.push_str(" marker-end=\"url(#arrowhead)\"");
+        }
+        if matches!(
+            rel.kind,
+            crate::ir::C4RelKind::BiRel | crate::ir::C4RelKind::RelBack
+        ) {
+            attrs.push_str(" marker-start=\"url(#arrowend)\"");
+        }
+        svg.push_str(&format!(
+            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke-width=\"{stroke_width}\" stroke=\"{}\" style=\"fill: none;\"{attrs} />",
             rel.start.0,
             rel.start.1,
             rel.end.0,
@@ -4775,10 +4834,13 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
             escape_xml(stroke),
         ));
     } else {
-        let control_x = rel.start.0 + (rel.end.0 - rel.start.0) / 4.0;
-        let control_y = rel.start.1 + (rel.end.1 - rel.start.1) / 2.0;
+        // Bow the curve perpendicular to the chord (shared with the quality
+        // scorer so both agree on the drawn geometry), so sibling arcs between
+        // the same boxes fan apart and read distinctly.
+        let (control_x, control_y) =
+            crate::layout::c4_arc_control(rel.start, rel.end, rel.bow);
         let mut path = format!(
-            "<path fill=\"none\" stroke-width=\"1\" stroke=\"{}\" d=\"M{:.2},{:.2} Q{:.2},{:.2} {:.2},{:.2}\"",
+            "<path fill=\"none\" stroke-width=\"{stroke_width}\" stroke=\"{}\" d=\"M{:.2},{:.2} Q{:.2},{:.2} {:.2},{:.2}\"",
             escape_xml(stroke),
             rel.start.0,
             rel.start.1,
@@ -4801,9 +4863,11 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
     }
 
     let text_color = rel.text_color.as_deref().unwrap_or(&conf.boundary_stroke);
-    let mid_x = rel.start.0.min(rel.end.0) + (rel.start.0 - rel.end.0).abs() / 2.0 + rel.offset_x;
-    let mid_y = rel.start.1.min(rel.end.1) + (rel.start.1 - rel.end.1).abs() / 2.0 + rel.offset_y;
-    svg.push_str(&c4_text_svg(
+    // `mid_y` is the label's CENTRE (the anchor the scorer placed). Draw centred
+    // there so the text matches the collision-checked rectangle.
+    let mid_x = rel.label_base.0 + rel.offset_x;
+    let mid_y = rel.label_base.1 + rel.offset_y;
+    svg.push_str(&c4_text_svg_centered(
         mid_x,
         mid_y,
         &rel.label.lines,
@@ -4814,7 +4878,7 @@ fn render_c4_rel(rel: &C4RelLayout, conf: &crate::config::C4Config, straight: bo
         false,
     ));
     if let Some(techn) = &rel.techn {
-        svg.push_str(&c4_text_svg(
+        svg.push_str(&c4_text_svg_centered(
             mid_x,
             mid_y + conf.message_font_size + 5.0,
             &techn.lines,
@@ -4838,10 +4902,54 @@ fn c4_text_svg(
     fill: &str,
     italic: bool,
 ) -> String {
+    // `y` is the TOP of the text block (matching the layout, which advances by
+    // the block height). Lay lines out DOWNWARD from there, each centred in its
+    // own line slot — so a multi-line description grows down into the box's open
+    // space instead of being centred on `y` and overflowing upward into the
+    // title/tech text above it.
+    c4_text_svg_top(x, y, lines, font_family, font_size, font_size, font_weight, fill, italic)
+}
+
+/// Like `c4_text_svg` but `cy` is the vertical CENTRE of the text block, not its
+/// top. Used for relationship labels: the layout scorer
+/// (`c4_label_rect_at_center`) places the label's rect centred on the resolved
+/// anchor, so the drawn text must be centred there too — otherwise multi-line
+/// labels drift downward off the collision-checked spot (one line slot is
+/// `font_size`, so a block of N lines is `font_size * N` tall).
+#[allow(clippy::too_many_arguments)]
+fn c4_text_svg_centered(
+    x: f32,
+    cy: f32,
+    lines: &[String],
+    font_family: &str,
+    font_size: f32,
+    font_weight: &str,
+    fill: &str,
+    italic: bool,
+) -> String {
+    let block_height = font_size * lines.len().max(1) as f32;
+    let top = cy - block_height / 2.0;
+    c4_text_svg_top(x, top, lines, font_family, font_size, font_size, font_weight, fill, italic)
+}
+
+/// Like `c4_text_svg` but with an explicit line height (slot pitch) for even
+/// vertical spacing.
+#[allow(clippy::too_many_arguments)]
+fn c4_text_svg_top(
+    x: f32,
+    y: f32,
+    lines: &[String],
+    font_family: &str,
+    font_size: f32,
+    line_height: f32,
+    font_weight: &str,
+    fill: &str,
+    italic: bool,
+) -> String {
     let mut out = String::new();
-    let line_count = lines.len() as f32;
     for (idx, line) in lines.iter().enumerate() {
-        let dy = idx as f32 * font_size - font_size * (line_count - 1.0) / 2.0;
+        // centre of line `idx`, measured from the block top `y`.
+        let dy = line_height * (idx as f32 + 0.5);
         out.push_str(&format!(
             "<text x=\"{x:.2}\" y=\"{y:.2}\" dominant-baseline=\"middle\" fill=\"{}\" style=\"text-anchor: middle; font-size: {}px; font-weight: {}; font-family: {}\"{}><tspan dy=\"{dy:.2}\" alignment-baseline=\"mathematical\">{}</tspan></text>",
             escape_xml(fill),
@@ -5699,9 +5807,28 @@ pub fn write_output_png(
 
     opt.fontdb_mut().load_system_fonts();
 
-    let tree = usvg::Tree::from_str(svg, &opt)?;
-    let size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+    // Pick the base raster size (before supersampling). The diagram's true
+    // aspect ratio is the viewBox; the requested width/height (CLI/config) is a
+    // bounding box. Fit the viewBox INSIDE that box preserving aspect ratio, so
+    // we honor the requested dimensions without ever squashing a tall diagram
+    // into a wide frame (the original distortion bug). Then rewrite the SVG root
+    // to that fitted size so usvg rasterizes undistorted, and supersample by
+    // `scale` for a sharp, high-resolution raster.
+    let scale = render_cfg.scale.clamp(1.0, 8.0);
+    let svg = match parse_svg_viewbox_size(svg) {
+        Some((vb_w, vb_h)) => {
+            let (fit_w, fit_h) =
+                fit_within(vb_w, vb_h, render_cfg.width, render_cfg.height);
+            rewrite_svg_root_size(svg, fit_w, fit_h)
+        }
+        None => svg.to_string(),
+    };
+
+    let tree = usvg::Tree::from_str(&svg, &opt)?;
+    let size = tree.size();
+    let px_w = ((size.width() * scale).round() as u32).max(1);
+    let px_h = ((size.height() * scale).round() as u32).max(1);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(px_w, px_h)
         .ok_or_else(|| anyhow::anyhow!("Failed to allocate pixmap"))?;
     if let Some(color) = parse_hex_color(&theme.background) {
         pixmap.fill(color);
@@ -5710,7 +5837,7 @@ pub fn write_output_png(
     let mut pixmap_mut = pixmap.as_mut();
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::default(),
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap_mut,
     );
     pixmap.save_png(output)?;
@@ -5724,6 +5851,87 @@ fn escape_xml(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+/// Scale (content_w, content_h) to fit inside the bounding box (box_w, box_h),
+/// preserving aspect ratio (letterbox). The result has the content's aspect
+/// ratio and touches at least one side of the box. If the bounding box is
+/// degenerate, the content size is returned unchanged so we never distort.
+#[cfg(feature = "png")]
+fn fit_within(content_w: f32, content_h: f32, box_w: f32, box_h: f32) -> (f32, f32) {
+    if content_w <= 0.0 || content_h <= 0.0 || box_w <= 0.0 || box_h <= 0.0 {
+        return (content_w.max(1.0), content_h.max(1.0));
+    }
+    let s = (box_w / content_w).min(box_h / content_h);
+    ((content_w * s).max(1.0), (content_h * s).max(1.0))
+}
+
+/// Extract the (width, height) of the SVG's viewBox from the root element, so
+/// the PNG raster matches the diagram's true aspect ratio.
+#[cfg(feature = "png")]
+fn parse_svg_viewbox_size(svg: &str) -> Option<(f32, f32)> {
+    let start = svg.find("viewBox=\"")? + "viewBox=\"".len();
+    let end = svg[start..].find('"')? + start;
+    let mut nums = svg[start..end]
+        .split_whitespace()
+        .filter_map(|s| s.parse::<f32>().ok());
+    let _x = nums.next()?;
+    let _y = nums.next()?;
+    let w = nums.next()?;
+    let h = nums.next()?;
+    if w > 0.0 && h > 0.0 {
+        Some((w, h))
+    } else {
+        None
+    }
+}
+
+/// Replace the root `<svg>` element's width/height (and any max-width style)
+/// with explicit pixel dimensions, so usvg rasterizes at that exact size and
+/// aspect ratio instead of a fixed CLI width/height that may distort the image.
+#[cfg(feature = "png")]
+fn rewrite_svg_root_size(svg: &str, w: f32, h: f32) -> String {
+    // Find the opening <svg ...> tag.
+    let Some(tag_start) = svg.find("<svg") else {
+        return svg.to_string();
+    };
+    let Some(tag_len) = svg[tag_start..].find('>') else {
+        return svg.to_string();
+    };
+    let tag_end = tag_start + tag_len; // index of '>'
+    let head = &svg[..tag_start];
+    let tag = &svg[tag_start..tag_end];
+    let tail = &svg[tag_end..];
+
+    // Drop existing width/height/style attributes from the tag, then re-add
+    // explicit width/height. Keep everything else (xmlns, viewBox, etc.).
+    let mut rebuilt = String::from("<svg");
+    let attrs = &tag["<svg".len()..];
+    let mut rest = attrs;
+    while let Some(eq) = rest.find('=') {
+        let name = rest[..eq].trim();
+        // value is quoted
+        let after = &rest[eq + 1..];
+        let quote = after.chars().next().unwrap_or('"');
+        let vstart = after.find(quote).map(|i| i + 1).unwrap_or(0);
+        let vend = after[vstart..].find(quote).map(|i| i + vstart).unwrap_or(after.len());
+        let value = &after[vstart..vend];
+        let consumed = eq + 1 + vend + 1;
+        let drop = matches!(name, "width" | "height" | "style");
+        if !drop && !name.is_empty() {
+            rebuilt.push(' ');
+            rebuilt.push_str(name);
+            rebuilt.push_str("=\"");
+            rebuilt.push_str(value);
+            rebuilt.push('"');
+        }
+        if consumed >= rest.len() {
+            break;
+        }
+        rest = &rest[consumed..];
+    }
+    rebuilt.push_str(&format!(" width=\"{w}\" height=\"{h}\""));
+    format!("{head}{rebuilt}{tail}")
 }
 
 #[cfg(feature = "png")]

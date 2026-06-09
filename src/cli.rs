@@ -41,6 +41,11 @@ pub struct Args {
     #[arg(short = 'H', long = "height", default_value_t = 800.0)]
     pub height: f32,
 
+    /// PNG supersampling factor for a sharper, high-resolution raster
+    /// (e.g. 2 or 3). SVG output is unaffected.
+    #[arg(short = 's', long = "scale", default_value_t = 2.0)]
+    pub scale: f32,
+
     /// Preferred output aspect ratio (`width:height`, `width/height`, or decimal)
     #[arg(long = "preferredAspectRatio", value_parser = parse_aspect_ratio_value)]
     pub preferred_aspect_ratio: Option<f32>,
@@ -135,6 +140,7 @@ pub fn run() -> Result<()> {
     let mut base_config = load_config(args.config.as_deref())?;
     base_config.render.width = args.width;
     base_config.render.height = args.height;
+    base_config.render.scale = args.scale;
     if let Some(ratio) = args.preferred_aspect_ratio {
         base_config.layout.preferred_aspect_ratio = Some(ratio);
     }
@@ -217,7 +223,7 @@ pub fn run() -> Result<()> {
 
         if args.timing {
             let total_us = parse_us + layout_us + render_us;
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "parse_us": parse_us,
                 "layout_us": layout_us,
                 "render_us": render_us,
@@ -229,6 +235,17 @@ pub fn run() -> Result<()> {
                     "total_us": layout_stages.total_us(),
                 }
             });
+            if let Some(q) = crate::layout::c4_quality_for_layout(&layout) {
+                payload["c4_quality"] = serde_json::json!({
+                    "score": q.score,
+                    "crossings": q.crossings,
+                    "box_hits": q.box_hits,
+                    "overlaps": q.overlaps,
+                    "bends": q.bends,
+                    "length": q.length,
+                    "area": q.area,
+                });
+            }
             eprintln!("{payload}");
         }
         return Ok(());

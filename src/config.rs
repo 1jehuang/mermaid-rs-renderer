@@ -340,6 +340,33 @@ pub struct C4Config {
     pub c4_shape_in_row: usize,
     pub next_line_padding_x: f32,
     pub c4_boundary_in_row: usize,
+    /// Master switch for placement refinement after the row-packed initial
+    /// placement. When false, shapes keep their raw declaration-order layout.
+    pub force_layout: bool,
+    /// Which placement engine to use when `force_layout` is true:
+    /// `"grid"` (default) — crossing-aware grid + local search;
+    /// `"force"` — continuous force-directed fallback;
+    /// `"none"` — keep the raw packing.
+    pub placement: String,
+    /// How relationship lines are routed:
+    /// `"auto"` (default) — render ortho/arc/straight and keep the lowest
+    /// quality score (fewest crossings, box-clips, overlaps);
+    /// `"ortho"` — orthogonal right-angle paths that bend around
+    /// shapes, with distinct evenly-spaced ports; best for dense diagrams;
+    /// `"arc"` — smooth curved arcs between distinct ports, sibling arcs fanned
+    /// apart; cleaner for simple/linear diagrams;
+    /// `"straight"` — direct straight lines between distinct ports;
+    /// `"none"` — straight center-to-center lines (no port distribution).
+    pub rel_routing: String,
+    /// Multiplier on the spacing between grid-placed shapes (and the gap from
+    /// the boundary). 1.0 = tight (one shape margin); larger = roomier.
+    pub grid_gap: f32,
+    /// Run simulated annealing over external-shape placement, scoring each
+    /// candidate by its fully-routed quality so placement is routing-aware
+    /// (moves blockers out of edge paths, pulls externals in). Costs more time.
+    pub optimize: bool,
+    /// Number of annealing iterations when `optimize` is true.
+    pub optimize_iterations: usize,
     pub wrap: bool,
     pub wrap_padding: f32,
     pub text_line_height: f32,
@@ -347,6 +374,8 @@ pub struct C4Config {
     pub text_line_height_small_threshold: f32,
     pub shape_corner_radius: f32,
     pub shape_stroke_width: f32,
+    /// Stroke width of relationship arrows.
+    pub rel_stroke_width: f32,
     pub boundary_corner_radius: f32,
     pub person_icon_size: f32,
     pub db_ellipse_height: f32,
@@ -470,14 +499,20 @@ impl Default for C4Config {
             use_max_width: true,
             diagram_margin_x: 32.0,
             diagram_margin_y: 8.0,
-            c4_shape_margin: 32.0,
-            c4_shape_padding: 16.0,
+            c4_shape_margin: 56.0,
+            c4_shape_padding: 24.0,
             width: 200.0,
             height: 56.0,
             box_margin: 8.0,
             c4_shape_in_row: 4,
             next_line_padding_x: 0.0,
             c4_boundary_in_row: 2,
+            force_layout: true,
+            placement: "grid".to_string(),
+            rel_routing: "auto".to_string(),
+            grid_gap: 1.9,
+            optimize: false,
+            optimize_iterations: 400,
             wrap: true,
             wrap_padding: 8.0,
             text_line_height: 1.0,
@@ -485,6 +520,7 @@ impl Default for C4Config {
             text_line_height_small_threshold: 14.0,
             shape_corner_radius: 2.5,
             shape_stroke_width: 0.5,
+            rel_stroke_width: 1.0,
             boundary_corner_radius: 2.5,
             person_icon_size: 48.0,
             db_ellipse_height: 10.0,
@@ -495,70 +531,70 @@ impl Default for C4Config {
             boundary_fill: "none".to_string(),
             boundary_fill_opacity: 0.0,
             person_font_size: 14.0,
-            person_font_family: "\"Open Sans\", sans-serif".to_string(),
+            person_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             person_font_weight: "normal".to_string(),
             external_person_font_size: 14.0,
-            external_person_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_person_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_person_font_weight: "normal".to_string(),
             system_font_size: 14.0,
-            system_font_family: "\"Open Sans\", sans-serif".to_string(),
+            system_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             system_font_weight: "normal".to_string(),
             external_system_font_size: 14.0,
-            external_system_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_system_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_system_font_weight: "normal".to_string(),
             system_db_font_size: 14.0,
-            system_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            system_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             system_db_font_weight: "normal".to_string(),
             external_system_db_font_size: 14.0,
-            external_system_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_system_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_system_db_font_weight: "normal".to_string(),
             system_queue_font_size: 14.0,
-            system_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            system_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             system_queue_font_weight: "normal".to_string(),
             external_system_queue_font_size: 14.0,
-            external_system_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_system_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_system_queue_font_weight: "normal".to_string(),
             boundary_font_size: 14.0,
-            boundary_font_family: "\"Open Sans\", sans-serif".to_string(),
+            boundary_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             boundary_font_weight: "normal".to_string(),
             message_font_size: 12.0,
-            message_font_family: "\"Open Sans\", sans-serif".to_string(),
+            message_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             message_font_weight: "normal".to_string(),
             container_font_size: 14.0,
-            container_font_family: "\"Open Sans\", sans-serif".to_string(),
+            container_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             container_font_weight: "normal".to_string(),
             external_container_font_size: 14.0,
-            external_container_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_container_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_container_font_weight: "normal".to_string(),
             container_db_font_size: 14.0,
-            container_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            container_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             container_db_font_weight: "normal".to_string(),
             external_container_db_font_size: 14.0,
-            external_container_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_container_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_container_db_font_weight: "normal".to_string(),
             container_queue_font_size: 14.0,
-            container_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            container_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             container_queue_font_weight: "normal".to_string(),
             external_container_queue_font_size: 14.0,
-            external_container_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_container_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_container_queue_font_weight: "normal".to_string(),
             component_font_size: 14.0,
-            component_font_family: "\"Open Sans\", sans-serif".to_string(),
+            component_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             component_font_weight: "normal".to_string(),
             external_component_font_size: 14.0,
-            external_component_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_component_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_component_font_weight: "normal".to_string(),
             component_db_font_size: 14.0,
-            component_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            component_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             component_db_font_weight: "normal".to_string(),
             external_component_db_font_size: 14.0,
-            external_component_db_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_component_db_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_component_db_font_weight: "normal".to_string(),
             component_queue_font_size: 14.0,
-            component_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            component_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             component_queue_font_weight: "normal".to_string(),
             external_component_queue_font_size: 14.0,
-            external_component_queue_font_family: "\"Open Sans\", sans-serif".to_string(),
+            external_component_queue_font_family: "\"Avenir Next\", \"Avenir\", \"Helvetica Neue\", \"Open Sans\", sans-serif".to_string(),
             external_component_queue_font_weight: "normal".to_string(),
             person_bg_color: "#08427B".to_string(),
             person_border_color: "#073B6F".to_string(),
@@ -936,6 +972,10 @@ pub struct RenderConfig {
     pub width: f32,
     pub height: f32,
     pub background: String,
+    /// PNG supersampling factor: the raster is rendered this many times larger
+    /// than the SVG's logical size for crisp text and lines, then is a true
+    /// high-resolution image (not upscaled). 1.0 = native size.
+    pub scale: f32,
 }
 
 impl Default for RenderConfig {
@@ -944,6 +984,7 @@ impl Default for RenderConfig {
             width: 1200.0,
             height: 800.0,
             background: "#FFFFFF".to_string(),
+            scale: 1.0,
         }
     }
 }
@@ -1298,6 +1339,25 @@ struct GitGraphConfigFile {
     commit_spacing: Option<f32>,
 }
 
+/// `relRouting` accepts either a string mode (`"ortho"`, `"arc"`, `"straight"`,
+/// `"none"`) or a legacy bool (`true` → ortho, `false` → none).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BoolOrString {
+    Bool(bool),
+    Str(String),
+}
+
+impl BoolOrString {
+    fn into_mode(self) -> String {
+        match self {
+            BoolOrString::Bool(true) => "ortho".to_string(),
+            BoolOrString::Bool(false) => "none".to_string(),
+            BoolOrString::Str(s) => s,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct C4ConfigFile {
@@ -1312,6 +1372,12 @@ struct C4ConfigFile {
     c4_shape_in_row: Option<usize>,
     next_line_padding_x: Option<f32>,
     c4_boundary_in_row: Option<usize>,
+    force_layout: Option<bool>,
+    placement: Option<String>,
+    rel_routing: Option<BoolOrString>,
+    grid_gap: Option<f32>,
+    optimize: Option<bool>,
+    optimize_iterations: Option<usize>,
     wrap: Option<bool>,
     wrap_padding: Option<f32>,
     text_line_height: Option<f32>,
@@ -1319,6 +1385,7 @@ struct C4ConfigFile {
     text_line_height_small_threshold: Option<f32>,
     shape_corner_radius: Option<f32>,
     shape_stroke_width: Option<f32>,
+    rel_stroke_width: Option<f32>,
     boundary_corner_radius: Option<f32>,
     person_icon_size: Option<f32>,
     db_ellipse_height: Option<f32>,
@@ -2354,6 +2421,24 @@ pub fn load_config(path: Option<&Path>) -> anyhow::Result<Config> {
         if let Some(v) = c4.c4_boundary_in_row {
             config.layout.c4.c4_boundary_in_row = v;
         }
+        if let Some(v) = c4.force_layout {
+            config.layout.c4.force_layout = v;
+        }
+        if let Some(v) = c4.placement {
+            config.layout.c4.placement = v;
+        }
+        if let Some(v) = c4.rel_routing {
+            config.layout.c4.rel_routing = v.into_mode();
+        }
+        if let Some(v) = c4.grid_gap {
+            config.layout.c4.grid_gap = v;
+        }
+        if let Some(v) = c4.optimize {
+            config.layout.c4.optimize = v;
+        }
+        if let Some(v) = c4.optimize_iterations {
+            config.layout.c4.optimize_iterations = v;
+        }
         if let Some(v) = c4.wrap {
             config.layout.c4.wrap = v;
         }
@@ -2374,6 +2459,9 @@ pub fn load_config(path: Option<&Path>) -> anyhow::Result<Config> {
         }
         if let Some(v) = c4.shape_stroke_width {
             config.layout.c4.shape_stroke_width = v;
+        }
+        if let Some(v) = c4.rel_stroke_width {
+            config.layout.c4.rel_stroke_width = v;
         }
         if let Some(v) = c4.boundary_corner_radius {
             config.layout.c4.boundary_corner_radius = v;
