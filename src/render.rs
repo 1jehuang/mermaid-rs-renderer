@@ -5759,9 +5759,22 @@ pub fn write_output_png(
 
     opt.fontdb_mut().load_system_fonts();
 
-    let tree = usvg::Tree::from_str(svg, &opt)?;
-    let size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+    // Render at the diagram's natural aspect ratio (the viewBox), not the SVG
+    // root width/height — those may be a fixed 1200x800 from the CLI, which
+    // would squash a tall diagram. Rewrite the root width/height to the viewBox
+    // size so usvg renders undistorted, then supersample by `scale` for a sharp,
+    // genuinely high-resolution raster.
+    let scale = render_cfg.scale.clamp(1.0, 8.0);
+    let svg = match parse_svg_viewbox_size(svg) {
+        Some((vb_w, vb_h)) => rewrite_svg_root_size(svg, vb_w, vb_h),
+        None => svg.to_string(),
+    };
+
+    let tree = usvg::Tree::from_str(&svg, &opt)?;
+    let size = tree.size();
+    let px_w = ((size.width() * scale).round() as u32).max(1);
+    let px_h = ((size.height() * scale).round() as u32).max(1);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(px_w, px_h)
         .ok_or_else(|| anyhow::anyhow!("Failed to allocate pixmap"))?;
     if let Some(color) = parse_hex_color(&theme.background) {
         pixmap.fill(color);
@@ -5770,7 +5783,7 @@ pub fn write_output_png(
     let mut pixmap_mut = pixmap.as_mut();
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::default(),
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap_mut,
     );
     pixmap.save_png(output)?;
@@ -5784,6 +5797,74 @@ fn escape_xml(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+/// Extract the (width, height) of the SVG's viewBox from the root element, so
+/// the PNG raster matches the diagram's true aspect ratio.
+#[cfg(feature = "png")]
+fn parse_svg_viewbox_size(svg: &str) -> Option<(f32, f32)> {
+    let start = svg.find("viewBox=\"")? + "viewBox=\"".len();
+    let end = svg[start..].find('"')? + start;
+    let mut nums = svg[start..end]
+        .split_whitespace()
+        .filter_map(|s| s.parse::<f32>().ok());
+    let _x = nums.next()?;
+    let _y = nums.next()?;
+    let w = nums.next()?;
+    let h = nums.next()?;
+    if w > 0.0 && h > 0.0 {
+        Some((w, h))
+    } else {
+        None
+    }
+}
+
+/// Replace the root `<svg>` element's width/height (and any max-width style)
+/// with explicit pixel dimensions, so usvg rasterizes at that exact size and
+/// aspect ratio instead of a fixed CLI width/height that may distort the image.
+#[cfg(feature = "png")]
+fn rewrite_svg_root_size(svg: &str, w: f32, h: f32) -> String {
+    // Find the opening <svg ...> tag.
+    let Some(tag_start) = svg.find("<svg") else {
+        return svg.to_string();
+    };
+    let Some(tag_len) = svg[tag_start..].find('>') else {
+        return svg.to_string();
+    };
+    let tag_end = tag_start + tag_len; // index of '>'
+    let head = &svg[..tag_start];
+    let tag = &svg[tag_start..tag_end];
+    let tail = &svg[tag_end..];
+
+    // Drop existing width/height/style attributes from the tag, then re-add
+    // explicit width/height. Keep everything else (xmlns, viewBox, etc.).
+    let mut rebuilt = String::from("<svg");
+    let attrs = &tag["<svg".len()..];
+    let mut rest = attrs;
+    while let Some(eq) = rest.find('=') {
+        let name = rest[..eq].trim();
+        // value is quoted
+        let after = &rest[eq + 1..];
+        let quote = after.chars().next().unwrap_or('"');
+        let vstart = after.find(quote).map(|i| i + 1).unwrap_or(0);
+        let vend = after[vstart..].find(quote).map(|i| i + vstart).unwrap_or(after.len());
+        let value = &after[vstart..vend];
+        let consumed = eq + 1 + vend + 1;
+        let drop = matches!(name, "width" | "height" | "style");
+        if !drop && !name.is_empty() {
+            rebuilt.push(' ');
+            rebuilt.push_str(name);
+            rebuilt.push_str("=\"");
+            rebuilt.push_str(value);
+            rebuilt.push('"');
+        }
+        if consumed >= rest.len() {
+            break;
+        }
+        rest = &rest[consumed..];
+    }
+    rebuilt.push_str(&format!(" width=\"{w}\" height=\"{h}\""));
+    format!("{head}{rebuilt}{tail}")
 }
 
 #[cfg(feature = "png")]
