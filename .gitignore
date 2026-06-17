@@ -1,4 +1,5 @@
 /target
+/restult/
 
 # Python cache
 __pycache__/

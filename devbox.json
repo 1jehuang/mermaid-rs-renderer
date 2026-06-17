@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "act",
+    "ast-grep",
+    "cargo",
+    "clippy",
+    "devbox",
+    "direnv",
+    "git",
+    "gh",
+    "glab",
+    "just",
+    "rust-analyzer",
+    "rustc",
+    "rustfmt"
+  ],
+  "shell": {
+    "init_hook": [
+    ]
+  },
+  "scripts": {
+    "build": "cargo build --release",
+    "test": "cargo test --workspace",
+    "debug": "cargo build --debug",
+    "install": "cargo install --path .",
+    "release": "cargo build --release",
+    "check": "cargo check --workspace",
+    "bench": "cargo bench",
+    "config": "cargo run -- --print-config"
+  }
+}
+
