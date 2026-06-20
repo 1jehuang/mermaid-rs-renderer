@@ -41,7 +41,9 @@ pub fn validate(input: &str) -> Result<(), ParseError> {
     check_init_directive(&lines)?;
 
     // 2-3. Subgraph / end balance.
-    check_subgraph_balance(&lines)?;
+    if is_flowchart_diagram(&lines) {
+        check_subgraph_balance(&lines)?;
+    }
 
     // 4. Lines beginning with an arrow.
     check_leading_arrow(&lines)?;
@@ -127,6 +129,18 @@ fn check_init_directive(lines: &[&str]) -> Result<(), ParseError> {
 /// Tracks a stack of `subgraph` opening-line numbers. An `end`
 /// with an empty stack yields [`ParseError::UnexpectedToken`];
 /// a non-empty stack at EOF yields [`ParseError::UnclosedSubgraph`]
+fn is_flowchart_diagram(lines: &[&str]) -> bool {
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("%%") {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        return lower.starts_with("flowchart") || lower.starts_with("graph ");
+    }
+    false
+}
+
 /// with the line of the outermost unclosed opening.
 fn check_subgraph_balance(lines: &[&str]) -> Result<(), ParseError> {
     let mut open_stack: Vec<u32> = Vec::new();

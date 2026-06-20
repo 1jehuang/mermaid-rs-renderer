@@ -1,0 +1,22 @@
+block-beta
+    columns 1
+    block:triggers["TRIGGERS"]
+        T["Cron | Webhook | Dashboard | Slack"]
+    end
+    block:orchestrator["ORCHESTRATOR"]
+        ORC["Reads context → Selects workflow → Spawns agents → Manages approval gates → Tracks progress"]
+    end
+    block:agents["AGENTS (LLM-Powered Decision Makers)"]
+        AG["Log Analyzer | Metrics Agent | Git Analyzer | Code Analyzer | Implementer | Verifier"]
+    end
+    block:tools["TOOLS (Dumb Executors — No LLM, Single Function, JSON In/Out)"]
+        TL["CloudWatch | Prometheus | Git CLI | Jira API | Slack API | Deploy CLI | Test Runner"]
+    end
+    block:state["MEMORY & STATE"]
+        ST["Session State | Workflow History | Run Artifacts | Config"]
+    end
+
+    triggers --> orchestrator
+    orchestrator --> agents
+    agents --> tools
+    agents --> state
