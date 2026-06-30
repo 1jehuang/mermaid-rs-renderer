@@ -83,3 +83,47 @@ fn cli_width_height_affect_file_svg() {
     let _ = std::fs::remove_file(output_path);
     let _ = std::fs::remove_dir(dir);
 }
+
+#[test]
+fn cli_info_diagram_reports_crate_version() {
+    // Mirrors `echo "info" | cargo run -- -i - -o info.svg`: the `info`
+    // diagram has no body, just a header, and always renders this crate's
+    // own name and version (matching how Mermaid.js's own `info` diagram
+    // reports its version).
+    let dir = std::env::temp_dir().join(format!(
+        "mermaid-rs-renderer-cli-info-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+    let output_path = dir.join("info.svg");
+
+    let mut child = mmdr()
+        .args(["-i", "-", "-o", output_path.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run mmdr");
+    child
+        .stdin
+        .as_mut()
+        .expect("failed to open stdin")
+        .write_all(b"info\n")
+        .expect("failed to write stdin");
+    let output = child.wait_with_output().expect("failed to wait for mmdr");
+
+    assert!(
+        output.status.success(),
+        "mmdr failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let svg = std::fs::read_to_string(&output_path).expect("failed to read SVG output");
+    let expected_text = format!("mermaid-rs {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        svg.contains(&expected_text),
+        "expected info SVG to contain {expected_text:?}: {svg}"
+    );
+
+    let _ = std::fs::remove_file(output_path);
+    let _ = std::fs::remove_dir(dir);
+}
