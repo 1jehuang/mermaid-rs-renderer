@@ -33,6 +33,7 @@ pub enum DiagramKind {
     Radar,
     Treemap,
     XYChart,
+    Info,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -83,6 +83,7 @@ pub fn parse_mermaid(input: &str) -> Result<ParseOutput> {
         DiagramKind::Radar => parse_radar_diagram(input),
         DiagramKind::Treemap => parse_treemap_diagram(input),
         DiagramKind::XYChart => parse_xy_chart_diagram(input),
+        DiagramKind::Info => parse_info_diagram(input),
         DiagramKind::Flowchart => parse_flowchart(input),
     }
 }
@@ -196,6 +197,9 @@ fn detect_diagram_kind(input: &str) -> Option<DiagramKind> {
         }
         if starts_with_diagram_header(&lower, "xychart") {
             return Some(DiagramKind::XYChart);
+        }
+        if starts_with_diagram_header(&lower, "info") {
+            return Some(DiagramKind::Info);
         }
         if starts_with_diagram_header(&lower, "flowchart")
             || starts_with_diagram_header(&lower, "graph")
@@ -1708,6 +1712,16 @@ fn parse_er_diagram(input: &str) -> Result<ParseOutput> {
         node.label = lines.join("\n");
     }
 
+    Ok(ParseOutput { graph, init_config })
+}
+
+fn parse_info_diagram(input: &str) -> Result<ParseOutput> {
+    // The `info` diagram has no body syntax of its own (mirroring Mermaid.js):
+    // the header line alone is enough to select the dedicated info renderer,
+    // which always reports this crate's own name and version.
+    let mut graph = Graph::new();
+    graph.kind = DiagramKind::Info;
+    let (_lines, init_config) = preprocess_input(input)?;
     Ok(ParseOutput { graph, init_config })
 }
 
@@ -7245,5 +7259,19 @@ A["foo & bar"] & B --> C"#;
             masked.len(),
             "masked string should have same byte length as original"
         );
+    }
+
+    #[test]
+    fn detect_info_diagram() {
+        assert_eq!(detect_diagram_kind("info"), Some(DiagramKind::Info));
+        assert_eq!(detect_diagram_kind("  info  \n"), Some(DiagramKind::Info));
+    }
+
+    #[test]
+    fn parse_info_diagram_sets_kind() {
+        let parsed = parse_mermaid("info").unwrap();
+        assert_eq!(parsed.graph.kind, DiagramKind::Info);
+        assert!(parsed.graph.nodes.is_empty());
+        assert!(parsed.graph.edges.is_empty());
     }
 }

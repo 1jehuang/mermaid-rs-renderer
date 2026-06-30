@@ -284,6 +284,19 @@ pub struct GitGraphLayout {
     pub direction: Direction,
 }
 
+/// Layout for the dedicated `info` diagram, which (like Mermaid.js) has no
+/// graph content of its own: it always renders this crate's own name and
+/// version as a single centered text label.
+#[derive(Debug, Clone)]
+pub struct InfoLayout {
+    pub width: f32,
+    pub height: f32,
+    pub text: String,
+    pub text_x: f32,
+    pub text_y: f32,
+    pub font_size: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct ErrorLayout {
     pub viewbox_width: f32,
@@ -461,6 +474,7 @@ pub enum DiagramData {
     Timeline(TimelineLayout),
     Journey(JourneyLayout),
     Error(ErrorLayout),
+    Info(InfoLayout),
 }
 
 #[derive(Debug, Clone)]

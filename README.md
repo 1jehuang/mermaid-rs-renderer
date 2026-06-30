@@ -149,7 +149,7 @@ mmdr -i README.md -o ./diagrams/ -e svg
 
 ## Diagram Types
 
-mmdr supports **23 Mermaid diagram types**:
+mmdr supports **24 Mermaid diagram types**:
 
 | Category | Diagrams |
 |:---------|:---------|
@@ -157,7 +157,7 @@ mmdr supports **23 Mermaid diagram types**:
 | **Data** | ER Diagram, Pie Chart, XY Chart, Quadrant Chart, Sankey |
 | **Planning** | Gantt, Timeline, Journey, Kanban |
 | **Architecture** | C4, Block, Architecture, Requirement |
-| **Other** | Mindmap, Git Graph, ZenUML, Packet, Radar, Treemap |
+| **Other** | Mindmap, Git Graph, ZenUML, Packet, Radar, Treemap, Info |
 
 <table>
 <tr>
@@ -289,7 +289,7 @@ Supported:
 
 ## Features
 
-**Diagram types:** `flowchart` / `graph` | `sequenceDiagram` | `classDiagram` | `stateDiagram-v2` | `erDiagram` | `pie` | `gantt` | `journey` | `timeline` | `mindmap` | `gitGraph` | `xychart-beta` | `quadrantChart` | `sankey-beta` | `kanban` | `C4Context` | `block-beta` | `architecture-beta` | `requirementDiagram` | `zenuml` | `packet-beta` | `radar-beta` | `treemap`
+**Diagram types:** `flowchart` / `graph` | `sequenceDiagram` | `classDiagram` | `stateDiagram-v2` | `erDiagram` | `pie` | `gantt` | `journey` | `timeline` | `mindmap` | `gitGraph` | `xychart-beta` | `quadrantChart` | `sankey-beta` | `kanban` | `C4Context` | `block-beta` | `architecture-beta` | `requirementDiagram` | `zenuml` | `packet-beta` | `radar-beta` | `treemap` | `info`
 
 **Node shapes:** rectangle, round-rect, stadium, circle, double-circle, diamond, hexagon, cylinder, subroutine, trapezoid, parallelogram, asymmetric
 

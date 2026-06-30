@@ -768,6 +768,17 @@ pub fn validate_layout_invariants(layout: &Layout) -> Result<(), Vec<LayoutInvar
                 check_finite(&mut errors, path, value);
             }
         }
+        DiagramData::Info(info) => {
+            for (path, value) in [
+                ("info.width", info.width),
+                ("info.height", info.height),
+                ("info.text_x", info.text_x),
+                ("info.text_y", info.text_y),
+                ("info.font_size", info.font_size),
+            ] {
+                check_finite(&mut errors, path, value);
+            }
+        }
     }
 
     if layout.kind == DiagramKind::Flowchart {

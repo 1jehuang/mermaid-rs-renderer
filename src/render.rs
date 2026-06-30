@@ -6,7 +6,7 @@ use crate::layout::label_placement::{
 };
 use crate::layout::{
     C4BoundaryLayout, C4Layout, C4RelLayout, C4ShapeLayout, DiagramData, ErrorLayout,
-    GitGraphLayout, JourneyLayout, Layout, PieData, SankeyLayout, TextBlock,
+    GitGraphLayout, InfoLayout, JourneyLayout, Layout, PieData, SankeyLayout, TextBlock,
 };
 use crate::text_metrics;
 use crate::theme::{Theme, adjust_color, parse_color_to_hsl};
@@ -313,6 +313,12 @@ pub fn render_svg_with_dimensions(
 
     if let DiagramData::C4(ref c4) = layout.diagram {
         svg.push_str(&render_c4(c4, config));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
+    if let DiagramData::Info(ref info) = layout.diagram {
+        svg.push_str(&render_info(info, theme));
         svg.push_str("</svg>");
         return svg;
     }
@@ -2202,6 +2208,19 @@ fn render_error(layout: &ErrorLayout, _theme: &Theme, _config: &LayoutConfig) ->
     svg.push_str("</g>");
 
     svg
+}
+
+fn render_info(layout: &InfoLayout, theme: &Theme) -> String {
+    let font_family = normalize_font_family(&theme.font_family);
+    format!(
+        "<text class=\"info-text\" x=\"{:.2}\" y=\"{:.2}\" font-family=\"{}\" font-size=\"{:.2}px\" fill=\"{}\" style=\"text-anchor: middle;\">{}</text>",
+        layout.text_x,
+        layout.text_y,
+        font_family,
+        layout.font_size,
+        theme.text_color,
+        escape_xml(&layout.text)
+    )
 }
 
 fn normalize_font_family(font_family: &str) -> String {
@@ -6388,6 +6407,17 @@ mod tests {
         assert!(svg.contains("id=\"edge-0\""));
         assert!(svg.contains("data-edge-id=\"edge-0\""));
         assert!(svg.contains("data-label-kind=\"center\""));
+    }
+
+    #[test]
+    fn render_svg_info_diagram() {
+        let mut graph = Graph::new();
+        graph.kind = crate::ir::DiagramKind::Info;
+        let layout = compute_layout(&graph, &Theme::modern(), &LayoutConfig::default());
+        let svg = render_svg(&layout, &Theme::modern(), &LayoutConfig::default());
+        let expected_text = format!("mermaid-rs {}", env!("CARGO_PKG_VERSION"));
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains(&expected_text));
     }
 
     #[test]

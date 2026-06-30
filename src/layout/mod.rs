@@ -6,6 +6,7 @@ mod flowchart;
 mod gantt;
 mod geometry;
 mod gitgraph;
+mod info;
 mod invariants;
 mod journey;
 mod kanban;
@@ -30,6 +31,7 @@ use c4::*;
 use error::*;
 use gantt::*;
 use gitgraph::*;
+use info::*;
 pub use invariants::{
     FlowchartQualityMetrics, LayoutInvariantError, flowchart_quality_metrics,
     validate_layout_invariants,
@@ -199,6 +201,7 @@ pub fn compute_layout_with_metrics(
         crate::ir::DiagramKind::XYChart => compute_xychart_layout(graph, theme, config),
         crate::ir::DiagramKind::Timeline => compute_timeline_layout(graph, theme, config),
         crate::ir::DiagramKind::Journey => compute_journey_layout(graph, theme, config),
+        crate::ir::DiagramKind::Info => compute_info_layout(graph, theme),
         crate::ir::DiagramKind::Class
         | crate::ir::DiagramKind::State
         | crate::ir::DiagramKind::Er
