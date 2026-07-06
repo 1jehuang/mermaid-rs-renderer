@@ -5825,7 +5825,10 @@ pub fn write_output_png(
         ..Default::default()
     };
 
-    opt.fontdb_mut().load_system_fonts();
+    // Inject the shared embedded face instead of enumerating system fonts.
+    // Guarantees zero filesystem I/O and deterministic glyph metrics on every
+    // platform (the database already forces all generic families to it).
+    *opt.fontdb_mut() = crate::embedded_font::get_font_database().clone();
 
     let tree = usvg::Tree::from_str(svg, &opt)?;
     let size = tree.size().to_int_size();
