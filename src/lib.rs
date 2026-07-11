@@ -102,6 +102,7 @@ mod text_metrics;
 pub mod theme;
 pub(crate) mod unicode_width;
 pub mod validator;
+mod wasm_time;
 
 // Re-export commonly used types at crate root for ergonomic library usage
 pub use config::{Config, LayoutConfig, RenderConfig, merge_init_config};
@@ -390,7 +391,7 @@ pub fn render_with_detailed_timing(
     input: &str,
     options: RenderOptions,
 ) -> anyhow::Result<RenderDetailedResult> {
-    use std::time::Instant;
+    use crate::wasm_time::Instant;
 
     let t0 = Instant::now();
     let parsed = parse_mermaid(input)?;
