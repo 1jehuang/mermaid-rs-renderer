@@ -12,7 +12,7 @@ jobs:
   verify-tag-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Ensure tag matches Cargo.toml version
@@ -35,7 +35,7 @@ jobs:
     needs: verify-tag-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -81,7 +81,7 @@ jobs:
             ext: ".exe"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -128,7 +128,7 @@ jobs:
     needs: [verify-tag-version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - id: check-published
         name: Check if this version is already on crates.io
@@ -160,7 +160,7 @@ jobs:
     needs: [build, publish-crate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Download release assets and compute sha256
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -176,7 +176,7 @@ jobs:
             echo "SHA_LINUX_ARM=$(sha256sum linux-arm.tar.gz | cut -d' ' -f1)"
             echo "VERSION=${VERSION}"
           } >> "$GITHUB_ENV"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: 1jehuang/homebrew-mmdr
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -197,7 +197,7 @@ jobs:
     needs: [build, publish-crate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Compute sha256 for linux binary
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
