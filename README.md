@@ -127,7 +127,7 @@ cargo install --path .
 brew tap 1jehuang/mmdr && brew install mmdr
 
 # Scoop (Windows)
-scoop bucket add mmdr https://github.com/1jehuang/scoop-mmdr && scoop install mmdr
+scoop install mmdr
 
 # AUR (Arch)
 yay -S mmdr-bin
