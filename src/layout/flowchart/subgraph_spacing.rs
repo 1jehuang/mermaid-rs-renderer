@@ -8,7 +8,7 @@ use crate::theme::Theme;
 use super::super::routing::is_horizontal;
 use super::super::{
     MIN_NODE_SPACING_FLOOR, NodeLayout, SUBGRAPH_DESIRED_GAP_RATIO, build_subgraph_layouts,
-    measure_label, subgraph_anchor_id, subgraph_padding_from_label, top_level_subgraph_indices,
+    subgraph_anchor_id, top_level_subgraph_indices,
 };
 
 fn is_region_subgraph(sub: &crate::ir::Subgraph) -> bool {
@@ -520,35 +520,16 @@ pub(in crate::layout) fn separate_sibling_subgraphs(
 
     let horizontal = is_horizontal(graph.direction);
     for group in sibling_groups {
+        // Measure the frames as they will be drawn. A parent that contains
+        // nested children is taller and wider than the members it declares, and
+        // separating on the smaller rect leaves the drawn boxes overlapping.
+        let rects = super::super::subgraphs::rendered_subgraph_rects(graph, nodes, theme, config);
         let mut bounds: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
         for &idx in &group {
-            let sub = &graph.subgraphs[idx];
-            let mut min_x = f32::MAX;
-            let mut min_y = f32::MAX;
-            let mut max_x = f32::MIN;
-            let mut max_y = f32::MIN;
-            for node_id in &sub.nodes {
-                if let Some(node) = nodes.get(node_id) {
-                    min_x = min_x.min(node.x);
-                    min_y = min_y.min(node.y);
-                    max_x = max_x.max(node.x + node.width);
-                    max_y = max_y.max(node.y + node.height);
-                }
-            }
-            if min_x == f32::MAX {
+            let Some([min_x, min_y, max_x, max_y]) = rects.get(idx).copied().flatten() else {
                 continue;
-            }
-
-            let label_block = measure_label(&sub.label, theme, config);
-            let (pad_x, pad_y, top_padding) =
-                subgraph_padding_from_label(graph, sub, theme, &label_block);
-            bounds.push((
-                idx,
-                min_x - pad_x,
-                min_y - top_padding,
-                max_x + pad_x,
-                max_y + pad_y,
-            ));
+            };
+            bounds.push((idx, min_x, min_y, max_x, max_y));
         }
 
         if bounds.len() < 2 {

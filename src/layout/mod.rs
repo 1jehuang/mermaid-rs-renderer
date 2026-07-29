@@ -736,7 +736,14 @@ fn compute_flowchart_layout(
         config,
     );
 
-    apply_subgraph_node_layout_passes(graph, &mut nodes, config, &anchored_indices, &anchor_info);
+    apply_subgraph_node_layout_passes(
+        graph,
+        &mut nodes,
+        theme,
+        config,
+        &anchored_indices,
+        &anchor_info,
+    );
 
     flowchart::subgraph_spacing::apply_flowchart_node_layout_cleanup(
         graph, &mut nodes, theme, config,
@@ -749,7 +756,7 @@ fn compute_flowchart_layout(
         &effective_config,
         fold_outcome.is_some(),
     );
-    apply_subgraph_direction_overrides(graph, &mut nodes, config, &anchored_indices);
+    apply_subgraph_direction_overrides(graph, &mut nodes, theme, config, &anchored_indices);
     // Objective and direction passes can shift whole top-level groups after the
     // initial subgraph cleanup. Re-apply the non-overlap spacing constraints
     // before subgraph boxes are materialized so dense cross-subgraph flowcharts
@@ -865,9 +872,32 @@ fn assign_positions(
         bucket.sort_by_key(|id| node_order.get(id.as_str()).copied().unwrap_or(usize::MAX));
     }
 
+    // Cross extent of every rank, so the ranks can be centred on each other
+    // rather than flush-aligned against the leading edge. Two nodes joined
+    // across ranks then line up on their centres, which is what a reader
+    // expects of a straight edge between them.
+    let cross_extents: Vec<f32> = rank_nodes
+        .iter()
+        .map(|bucket| {
+            let mut extent = 0.0f32;
+            for node_id in bucket {
+                if let Some(node) = nodes.get(node_id.as_str()) {
+                    let size = if is_horizontal(direction) {
+                        node.height
+                    } else {
+                        node.width
+                    };
+                    extent += size + config.node_spacing;
+                }
+            }
+            (extent - config.node_spacing).max(0.0)
+        })
+        .collect();
+    let widest_rank = cross_extents.iter().copied().fold(0.0f32, f32::max);
+
     let mut main_cursor = 0.0;
-    for bucket in rank_nodes {
-        let mut cross_cursor = 0.0;
+    for (rank, bucket) in rank_nodes.into_iter().enumerate() {
+        let mut cross_cursor = (widest_rank - cross_extents[rank]) * 0.5;
         let mut max_main: f32 = 0.0;
         for node_id in bucket {
             if let Some(node) = nodes.get_mut(&node_id) {
