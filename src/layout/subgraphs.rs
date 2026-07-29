@@ -70,19 +70,7 @@ pub(super) fn apply_subgraph_bands(
         if bucket.is_empty() {
             continue;
         }
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in bucket {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-        if min_x != f32::MAX {
+        if let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, bucket) {
             groups.push((idx, min_x, min_y, max_x, max_y));
         }
     }
@@ -391,19 +379,9 @@ pub(super) fn apply_orthogonal_region_bands(
     for region_list in parent_map.values() {
         let mut region_boxes: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
         for &region_idx in region_list {
-            let mut min_x = f32::MAX;
-            let mut min_y = f32::MAX;
-            let mut max_x = f32::MIN;
-            let mut max_y = f32::MIN;
-            for node_id in &graph.subgraphs[region_idx].nodes {
-                if let Some(node) = nodes.get(node_id) {
-                    min_x = min_x.min(node.x);
-                    min_y = min_y.min(node.y);
-                    max_x = max_x.max(node.x + node.width);
-                    max_y = max_y.max(node.y + node.height);
-                }
-            }
-            if min_x != f32::MAX {
+            if let Some((min_x, min_y, max_x, max_y)) =
+                super::node_bounds(nodes, &graph.subgraphs[region_idx].nodes)
+            {
                 region_boxes.push((region_idx, min_x, min_y, max_x, max_y));
             }
         }
@@ -503,6 +481,7 @@ pub(super) fn top_level_subgraph_indices(graph: &Graph) -> Vec<usize> {
 pub(super) fn apply_subgraph_node_layout_passes(
     graph: &Graph,
     nodes: &mut BTreeMap<String, NodeLayout>,
+    theme: &Theme,
     config: &LayoutConfig,
     anchored_indices: &HashSet<usize>,
     anchor_info: &HashMap<String, SubgraphAnchorInfo>,
@@ -512,10 +491,10 @@ pub(super) fn apply_subgraph_node_layout_passes(
     }
 
     if graph.kind != DiagramKind::State {
-        apply_subgraph_direction_overrides(graph, nodes, config, anchored_indices);
+        apply_subgraph_direction_overrides(graph, nodes, theme, config, anchored_indices);
     }
     if !anchor_info.is_empty() {
-        let _ = align_subgraphs_to_anchor_nodes(graph, anchor_info, nodes, config);
+        let _ = align_subgraphs_to_anchor_nodes(graph, anchor_info, nodes, theme, config);
     }
     if graph.kind == DiagramKind::State && !anchor_info.is_empty() {
         apply_state_subgraph_layouts(graph, nodes, config, anchored_indices);
@@ -534,9 +513,11 @@ pub(super) fn apply_subgraph_node_layout_passes(
 pub(super) fn apply_subgraph_direction_overrides(
     graph: &Graph,
     nodes: &mut BTreeMap<String, NodeLayout>,
+    theme: &Theme,
     config: &LayoutConfig,
     skip_indices: &HashSet<usize>,
 ) {
+    let tree = SubgraphTree::build(graph);
     for (idx, sub) in graph.subgraphs.iter().enumerate() {
         if skip_indices.contains(&idx) {
             continue;
@@ -557,60 +538,24 @@ pub(super) fn apply_subgraph_direction_overrides(
             continue;
         }
 
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, _, _)) = super::node_bounds(nodes, &sub.nodes) else {
             continue;
-        }
+        };
 
-        let mut temp_nodes: BTreeMap<String, NodeLayout> = BTreeMap::new();
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                let mut clone = node.clone();
-                clone.x = 0.0;
-                clone.y = 0.0;
-                temp_nodes.insert(node_id.clone(), clone);
-            }
-        }
-        let local_config = subgraph_layout_config(graph, false, config);
-        let ranks = compute_ranks_subset(&sub.nodes, &graph.edges, &graph.node_order);
-        super::assign_positions(
-            &sub.nodes,
-            &ranks,
-            direction,
-            &local_config,
-            &mut temp_nodes,
-            0.0,
-            0.0,
+        // Re-place the members with the same recursive routine the anchored
+        // path uses, so a nested child keeps its own direction and stays whole
+        // instead of dissolving into this subgraph's rank graph. Keeping the
+        // existing top-left corner leaves surrounding layout undisturbed.
+        layout_cluster_contents(
+            graph,
+            idx,
+            &tree,
+            nodes,
+            theme,
+            config,
+            false,
+            (min_x, min_y),
         );
-        let mut temp_min_x = f32::MAX;
-        let mut temp_min_y = f32::MAX;
-        for node_id in &sub.nodes {
-            if let Some(node) = temp_nodes.get(node_id) {
-                temp_min_x = temp_min_x.min(node.x);
-                temp_min_y = temp_min_y.min(node.y);
-            }
-        }
-        if temp_min_x == f32::MAX {
-            continue;
-        }
-        for node_id in &sub.nodes {
-            if let (Some(target), Some(source)) = (nodes.get_mut(node_id), temp_nodes.get(node_id))
-            {
-                target.x = source.x - temp_min_x + min_x;
-                target.y = source.y - temp_min_y + min_y;
-            }
-        }
-
-        if matches!(direction, Direction::RightLeft | Direction::BottomTop) {
-            mirror_subgraph_nodes(&sub.nodes, nodes, direction);
-        }
     }
 }
 
@@ -824,9 +769,305 @@ pub(super) fn subgraph_padding_from_label(
     (pad_x, pad_y, top_padding)
 }
 
-fn estimate_subgraph_box_size(
+/// A subgraph's rendered title block and the padding its frame puts around its
+/// contents, as `(label_block, (pad_x, pad_y, top_padding))`.
+///
+/// An untitled subgraph measures as a zero-sized block so it gets no title
+/// band. Every caller needs that same pairing, so it lives here rather than
+/// being spelled out again at each frame-sizing site.
+pub(in crate::layout) fn subgraph_label_metrics(
     graph: &Graph,
     sub: &crate::ir::Subgraph,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> (TextBlock, (f32, f32, f32)) {
+    let mut label_block = measure_label(&sub.label, theme, config);
+    if sub.label.trim().is_empty() {
+        label_block.width = 0.0;
+        label_block.height = 0.0;
+    }
+    let padding = subgraph_padding_from_label(graph, sub, theme, &label_block);
+    (label_block, padding)
+}
+
+/// Lay out one cluster's contents, innermost first, and return the bounding box
+/// its members ended up occupying.
+///
+/// A cluster's members are stored flattened (`TOP.nodes` is `[i1,f1,i2,f2]`,
+/// not `[B1,B2]`), so ranking them directly makes nested clusters dissolve into
+/// their parent's rank graph: sibling clusters land on shared ranks and an edge
+/// written between two of them (`B1 --> B2`) is dropped, because it targets
+/// their anchors rather than any member.
+///
+/// So resolve the nesting explicitly instead. Each child cluster is laid out
+/// first, then stands in its parent's rank graph as a single unit sized to its
+/// own result; edges are rewritten onto those units. Once the parent has placed
+/// the units, each child is translated rigidly into its slot. Every cluster is
+/// therefore ranked once, with its own `direction`, over its real children.
+fn layout_cluster_contents(
+    graph: &Graph,
+    idx: usize,
+    tree: &SubgraphTree,
+    nodes: &mut BTreeMap<String, NodeLayout>,
+    theme: &Theme,
+    config: &LayoutConfig,
+    anchorable: bool,
+    origin: (f32, f32),
+) -> Option<(f32, f32, f32, f32)> {
+    let sub = graph.subgraphs.get(idx)?;
+    if sub.nodes.is_empty() {
+        return None;
+    }
+
+    let units = lay_out_child_clusters(graph, idx, tree, nodes, theme, config, anchorable);
+    let unit_ids = cluster_unit_ids(graph, sub, &units, nodes);
+    if unit_ids.is_empty() {
+        return None;
+    }
+    let unit_edges = cluster_unit_edges(graph, &units, &unit_ids);
+
+    let borrowed = insert_cluster_placeholders(graph, &units, nodes);
+    let direction = subgraph_layout_direction(graph, sub);
+    let ranks = compute_ranks_subset(
+        &unit_ids,
+        &unit_edges,
+        &cluster_unit_order(graph, &unit_ids),
+    );
+    super::assign_positions(
+        &unit_ids,
+        &ranks,
+        direction,
+        &subgraph_layout_config(graph, anchorable, config),
+        nodes,
+        origin.0,
+        origin.1,
+    );
+    if matches!(direction, Direction::RightLeft | Direction::BottomTop) {
+        mirror_subgraph_nodes(&unit_ids, nodes, direction);
+    }
+
+    let child_rects: Vec<(f32, f32, f32, f32)> = units
+        .iter()
+        .filter_map(|unit| move_child_into_slot(graph, unit, nodes))
+        .collect();
+    restore_borrowed_nodes(nodes, borrowed);
+
+    // A child's frame extends past its members by its own padding, so the
+    // parent has to contain the frames, not just the leaves.
+    let members = super::node_bounds(nodes, &sub.nodes);
+    child_rects
+        .into_iter()
+        .chain(members)
+        .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+}
+
+/// A nested cluster, laid out and ready to stand in its parent's rank graph as
+/// one sized block.
+struct ClusterUnit {
+    child: usize,
+    /// Id of the hidden stand-in node placed in the parent's map.
+    id: String,
+    width: f32,
+    height: f32,
+    /// `(pad_x, pad_y, top_padding)` the child's own frame adds.
+    padding: (f32, f32, f32),
+}
+
+/// Lay each nested child out first, so it has a real size to stand in with.
+fn lay_out_child_clusters(
+    graph: &Graph,
+    idx: usize,
+    tree: &SubgraphTree,
+    nodes: &mut BTreeMap<String, NodeLayout>,
+    theme: &Theme,
+    config: &LayoutConfig,
+    anchorable: bool,
+) -> Vec<ClusterUnit> {
+    let mut units = Vec::new();
+    for &child in &tree.children[idx] {
+        let Some(bounds) = layout_cluster_contents(
+            graph,
+            child,
+            tree,
+            nodes,
+            theme,
+            config,
+            anchorable,
+            (0.0, 0.0),
+        ) else {
+            continue;
+        };
+        let padding = subgraph_label_metrics(graph, &graph.subgraphs[child], theme, config).1;
+        units.push(ClusterUnit {
+            child,
+            id: format!("__cluster_unit_{child}__"),
+            width: bounds.2 - bounds.0 + padding.0 * 2.0,
+            height: bounds.3 - bounds.1 + padding.2 + padding.1,
+            padding,
+        });
+    }
+    units
+}
+
+/// What this cluster ranks over: its own direct members, then one stand-in per
+/// nested child. A member claimed by a child belongs to that child, not here.
+fn cluster_unit_ids(
+    graph: &Graph,
+    sub: &crate::ir::Subgraph,
+    units: &[ClusterUnit],
+    nodes: &BTreeMap<String, NodeLayout>,
+) -> Vec<String> {
+    let claimed: HashSet<&str> = units
+        .iter()
+        .flat_map(|unit| graph.subgraphs[unit.child].nodes.iter().map(String::as_str))
+        .collect();
+    let mut ids: Vec<String> = sub
+        .nodes
+        .iter()
+        .filter(|member| !claimed.contains(member.as_str()) && nodes.contains_key(*member))
+        .cloned()
+        .collect();
+    ids.extend(units.iter().map(|unit| unit.id.clone()));
+    ids
+}
+
+/// The graph's edges rewritten onto those units, dropping any that does not
+/// touch this cluster and any that becomes a self-edge.
+///
+/// An edge may name a child cluster rather than one of its members
+/// (`B1 --> B2`). Those names are resolved from the subgraph itself: consulting
+/// the node map instead would silently drop the edge whenever the map does not
+/// happen to carry the anchor, which is exactly the case while sizing.
+fn cluster_unit_edges(
+    graph: &Graph,
+    units: &[ClusterUnit],
+    unit_ids: &[String],
+) -> Vec<crate::ir::Edge> {
+    let mut stands_for: HashMap<&str, &str> = HashMap::new();
+    for unit in units {
+        let child = &graph.subgraphs[unit.child];
+        for member in &child.nodes {
+            stands_for.insert(member.as_str(), unit.id.as_str());
+        }
+        for alias in [child.id.as_deref(), Some(child.label.as_str())]
+            .into_iter()
+            .flatten()
+        {
+            if !child.nodes.iter().any(|member| member == alias) {
+                stands_for.insert(alias, unit.id.as_str());
+            }
+        }
+    }
+    let resolve = |id: &str| -> Option<String> {
+        stands_for
+            .get(id)
+            .map(|unit| (*unit).to_string())
+            .or_else(|| unit_ids.iter().find(|known| known.as_str() == id).cloned())
+    };
+
+    let mut edges = Vec::new();
+    for edge in &graph.edges {
+        let (Some(from), Some(to)) = (resolve(&edge.from), resolve(&edge.to)) else {
+            continue;
+        };
+        if from != to {
+            let mut mapped = edge.clone();
+            mapped.from = from;
+            mapped.to = to;
+            edges.push(mapped);
+        }
+    }
+    edges
+}
+
+/// Declaration order for the units, so ranking ties break the way the source
+/// reads.
+fn cluster_unit_order(graph: &Graph, unit_ids: &[String]) -> HashMap<String, usize> {
+    unit_ids
+        .iter()
+        .enumerate()
+        .map(|(position, id)| {
+            let key = graph.node_order.get(id).copied().unwrap_or(position);
+            (id.clone(), key)
+        })
+        .collect()
+}
+
+/// Put each child into `nodes` as a hidden node of the child's own size, so the
+/// placement pass treats it as one block. Returns what to put back afterwards.
+fn insert_cluster_placeholders(
+    graph: &Graph,
+    units: &[ClusterUnit],
+    nodes: &mut BTreeMap<String, NodeLayout>,
+) -> Vec<(String, Option<NodeLayout>)> {
+    let mut borrowed = Vec::new();
+    for unit in units {
+        // Clone a real member so the stand-in carries valid defaults for every
+        // field the placement pass reads; only id/size/visibility matter here.
+        let Some(mut placeholder) = graph.subgraphs[unit.child]
+            .nodes
+            .iter()
+            .find_map(|member| nodes.get(member))
+            .cloned()
+        else {
+            continue;
+        };
+        placeholder.id = unit.id.clone();
+        placeholder.x = 0.0;
+        placeholder.y = 0.0;
+        placeholder.width = unit.width;
+        placeholder.height = unit.height;
+        placeholder.hidden = true;
+        placeholder.anchor_subgraph = None;
+        borrowed.push((unit.id.clone(), nodes.insert(unit.id.clone(), placeholder)));
+    }
+    borrowed
+}
+
+fn restore_borrowed_nodes(
+    nodes: &mut BTreeMap<String, NodeLayout>,
+    borrowed: Vec<(String, Option<NodeLayout>)>,
+) {
+    for (id, previous) in borrowed {
+        match previous {
+            Some(node) => nodes.insert(id, node),
+            None => nodes.remove(&id),
+        };
+    }
+}
+
+/// Translate a child's members rigidly from where they were laid out to the
+/// slot its stand-in ended up in, returning the rect its frame occupies.
+fn move_child_into_slot(
+    graph: &Graph,
+    unit: &ClusterUnit,
+    nodes: &mut BTreeMap<String, NodeLayout>,
+) -> Option<(f32, f32, f32, f32)> {
+    let placed = nodes.get(unit.id.as_str())?;
+    let rect = (
+        placed.x,
+        placed.y,
+        placed.x + placed.width,
+        placed.y + placed.height,
+    );
+    let (target_x, target_y) = (rect.0 + unit.padding.0, rect.1 + unit.padding.2);
+    let members = &graph.subgraphs[unit.child].nodes;
+    let (min_x, min_y, _, _) = super::node_bounds(nodes, members)?;
+    let (dx, dy) = (target_x - min_x, target_y - min_y);
+    for member in members {
+        if let Some(node) = nodes.get_mut(member) {
+            node.x += dx;
+            node.y += dy;
+        }
+    }
+    Some(rect)
+}
+
+fn estimate_subgraph_box_size(
+    graph: &Graph,
+    sub_idx: usize,
+    sub: &crate::ir::Subgraph,
+    tree: &SubgraphTree,
     nodes: &BTreeMap<String, NodeLayout>,
     theme: &Theme,
     config: &LayoutConfig,
@@ -835,7 +1076,10 @@ fn estimate_subgraph_box_size(
     if sub.nodes.is_empty() {
         return None;
     }
-    let direction = subgraph_layout_direction(graph, sub);
+    // Size the cluster with the same routine that will later place it, so the
+    // anchor standing in for it during the parent's layout is exactly the size
+    // the cluster really occupies. Anything else leaves neighbours ranked
+    // against a box that does not exist.
     let mut temp_nodes: BTreeMap<String, NodeLayout> = BTreeMap::new();
     for node_id in &sub.nodes {
         if let Some(node) = nodes.get(node_id) {
@@ -845,40 +1089,18 @@ fn estimate_subgraph_box_size(
             temp_nodes.insert(node_id.clone(), clone);
         }
     }
-    let local_config = subgraph_layout_config(graph, anchorable, config);
-    let ranks = compute_ranks_subset(&sub.nodes, &graph.edges, &graph.node_order);
-    super::assign_positions(
-        &sub.nodes,
-        &ranks,
-        direction,
-        &local_config,
+    let (min_x, min_y, max_x, max_y) = layout_cluster_contents(
+        graph,
+        sub_idx,
+        tree,
         &mut temp_nodes,
-        0.0,
-        0.0,
-    );
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
-    for node_id in &sub.nodes {
-        if let Some(node) = temp_nodes.get(node_id) {
-            min_x = min_x.min(node.x);
-            min_y = min_y.min(node.y);
-            max_x = max_x.max(node.x + node.width);
-            max_y = max_y.max(node.y + node.height);
-        }
-    }
-    if min_x == f32::MAX {
-        return None;
-    }
-    let label_empty = sub.label.trim().is_empty();
-    let mut label_block = measure_label(&sub.label, theme, config);
-    if label_empty {
-        label_block.width = 0.0;
-        label_block.height = 0.0;
-    }
-    let (padding_x, padding_y, top_padding) =
-        subgraph_padding_from_label(graph, sub, theme, &label_block);
+        theme,
+        config,
+        anchorable,
+        (0.0, 0.0),
+    )?;
+    let (_, (padding_x, padding_y, top_padding)) =
+        subgraph_label_metrics(graph, sub, theme, config);
 
     let width = (max_x - min_x) + padding_x * 2.0;
     let height = (max_y - min_y) + padding_y + top_padding;
@@ -895,6 +1117,7 @@ pub(super) fn apply_subgraph_anchor_sizes(
     if graph.subgraphs.is_empty() {
         return anchors;
     }
+    let tree = SubgraphTree::build(graph);
     for (idx, sub) in graph.subgraphs.iter().enumerate() {
         if is_region_subgraph(sub) || !subgraph_should_anchor(sub, graph, nodes) {
             continue;
@@ -903,7 +1126,7 @@ pub(super) fn apply_subgraph_anchor_sizes(
             continue;
         };
         let Some((width, height, padding_x, top_padding)) =
-            estimate_subgraph_box_size(graph, sub, nodes, theme, config, true)
+            estimate_subgraph_box_size(graph, idx, sub, &tree, nodes, theme, config, true)
         else {
             continue;
         };
@@ -927,6 +1150,7 @@ pub(super) fn align_subgraphs_to_anchor_nodes(
     graph: &Graph,
     anchor_info: &HashMap<String, SubgraphAnchorInfo>,
     nodes: &mut BTreeMap<String, NodeLayout>,
+    theme: &Theme,
     config: &LayoutConfig,
 ) -> HashSet<String> {
     let mut anchored_nodes = HashSet::new();
@@ -966,6 +1190,22 @@ pub(super) fn align_subgraphs_to_anchor_nodes(
     });
 
     for (anchor_id, info) in ordered_anchors {
+        // A nested cluster is placed by its parent's recursion, as a rigid
+        // block. Re-placing it here from its own anchor -- which came from the
+        // top-level rank graph and knows nothing of the parent's interior --
+        // would tear it back out of that arrangement.
+        if tree
+            .parent
+            .get(info.sub_idx)
+            .and_then(|parent| *parent)
+            .is_some()
+        {
+            if let Some(sub) = graph.subgraphs.get(info.sub_idx) {
+                anchored_nodes.extend(sub.nodes.iter().cloned());
+            }
+            continue;
+        }
+
         let (anchor_x, anchor_y) = {
             let Some(anchor) = nodes.get(anchor_id) else {
                 continue;
@@ -975,21 +1215,16 @@ pub(super) fn align_subgraphs_to_anchor_nodes(
         let Some(sub) = graph.subgraphs.get(info.sub_idx) else {
             continue;
         };
-        let direction = subgraph_layout_direction(graph, sub);
-        let local_config = subgraph_layout_config(graph, true, config);
-        let ranks = compute_ranks_subset(&sub.nodes, &graph.edges, &graph.node_order);
-        super::assign_positions(
-            &sub.nodes,
-            &ranks,
-            direction,
-            &local_config,
+        layout_cluster_contents(
+            graph,
+            info.sub_idx,
+            &tree,
             nodes,
-            anchor_x + info.padding_x,
-            anchor_y + info.top_padding,
+            theme,
+            config,
+            true,
+            (anchor_x + info.padding_x, anchor_y + info.top_padding),
         );
-        if matches!(direction, Direction::RightLeft | Direction::BottomTop) {
-            mirror_subgraph_nodes(&sub.nodes, nodes, direction);
-        }
         anchored_nodes.extend(sub.nodes.iter().cloned());
     }
     anchored_nodes
@@ -1043,17 +1278,9 @@ pub(super) fn apply_state_subgraph_layouts(
         if skip_indices.contains(&idx) || sub.nodes.len() <= 1 {
             continue;
         }
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, _, _)) = super::node_bounds(nodes, &sub.nodes) else {
             continue;
-        }
+        };
 
         let mut saved_sizes: Vec<(String, f32, f32)> = Vec::new();
         let mut inner_anchor_ids: Vec<String> = Vec::new();
@@ -1335,23 +1562,9 @@ fn mirror_subgraph_nodes(
     nodes: &mut BTreeMap<String, NodeLayout>,
     direction: Direction,
 ) {
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
-
-    for node_id in node_ids {
-        if let Some(node) = nodes.get(node_id) {
-            min_x = min_x.min(node.x);
-            min_y = min_y.min(node.y);
-            max_x = max_x.max(node.x + node.width);
-            max_y = max_y.max(node.y + node.height);
-        }
-    }
-
-    if min_x == f32::MAX {
+    let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, node_ids) else {
         return;
-    }
+    };
 
     if matches!(direction, Direction::RightLeft) {
         for node_id in node_ids {
@@ -1399,38 +1612,63 @@ pub(super) fn build_subgraph_layouts(
     theme: &Theme,
     config: &LayoutConfig,
 ) -> Vec<SubgraphLayout> {
+    let (mut subgraphs, _) = build_subgraph_layouts_indexed(graph, nodes, theme, config);
+    subgraphs.sort_by(|a, b| {
+        let area_a = a.width * a.height;
+        let area_b = b.width * b.height;
+        area_b.partial_cmp(&area_a).unwrap_or(Ordering::Equal)
+    });
+    subgraphs
+}
+
+/// The rect each subgraph will actually be drawn with, keyed by its index in
+/// `graph.subgraphs` (`None` when the subgraph has no placed member). Spacing
+/// passes need this rather than a frame's own members: a parent grows to
+/// contain its nested children, and a pass that measures only the members it
+/// declares will leave two frames overlapping.
+pub(in crate::layout) fn rendered_subgraph_rects(
+    graph: &Graph,
+    nodes: &BTreeMap<String, NodeLayout>,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> Vec<Option<[f32; 4]>> {
+    let (subgraphs, graph_to_local) = build_subgraph_layouts_indexed(graph, nodes, theme, config);
+    graph_to_local
+        .into_iter()
+        .map(|local| {
+            local.map(|local| {
+                let sub = &subgraphs[local];
+                [sub.x, sub.y, sub.x + sub.width, sub.y + sub.height]
+            })
+        })
+        .collect()
+}
+
+/// Shared body of the two above: frames in `graph.subgraphs` order, plus the
+/// index mapping that ordering implies.
+fn build_subgraph_layouts_indexed(
+    graph: &Graph,
+    nodes: &BTreeMap<String, NodeLayout>,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> (Vec<SubgraphLayout>, Vec<Option<usize>>) {
     let mut subgraphs = Vec::new();
     // Maps graph.subgraphs index -> local subgraphs index (None if skipped).
     let mut graph_to_local: Vec<Option<usize>> = Vec::with_capacity(graph.subgraphs.len());
+    // Title room each frame reserves above its contents, kept so that growing a
+    // parent around a nested child cannot swallow the parent's own title band.
+    let mut top_paddings: Vec<f32> = Vec::with_capacity(graph.subgraphs.len());
     for sub in &graph.subgraphs {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, &sub.nodes) else {
             graph_to_local.push(None);
+            top_paddings.push(0.0);
             continue;
-        }
+        };
 
         let style = resolve_subgraph_style(sub, graph);
-        let mut label_block = measure_label(&sub.label, theme, config);
         let label_empty = sub.label.trim().is_empty();
-        if label_empty {
-            label_block.width = 0.0;
-            label_block.height = 0.0;
-        }
-        let (padding_x, padding_y, top_padding) =
-            subgraph_padding_from_label(graph, sub, theme, &label_block);
+        let (label_block, (padding_x, padding_y, top_padding)) =
+            subgraph_label_metrics(graph, sub, theme, config);
 
         let node_width = max_x - min_x;
         let base_width = node_width + padding_x * 2.0;
@@ -1443,6 +1681,7 @@ pub(super) fn build_subgraph_layouts(
         let extra_width = width - base_width;
 
         graph_to_local.push(Some(subgraphs.len()));
+        top_paddings.push(top_padding);
         subgraphs.push(SubgraphLayout {
             id: sub.id.clone(),
             label: sub.label.clone(),
@@ -1504,9 +1743,13 @@ pub(super) fn build_subgraph_layouts(
                     let child = &subgraphs[local_j];
                     (child.x, child.y, child.width, child.height)
                 };
+                // The top side is not free space: it carries the parent's own
+                // title. Clearing the child by `pad` there would let the child
+                // box slide up under the parent's label.
+                let top_pad = top_paddings[i].max(pad);
                 let parent = &mut subgraphs[local_i];
                 let min_x = parent.x.min(child_x - pad);
-                let min_y = parent.y.min(child_y - pad);
+                let min_y = parent.y.min(child_y - top_pad);
                 let max_x = (parent.x + parent.width).max(child_x + child_w + pad);
                 let max_y = (parent.y + parent.height).max(child_y + child_h + pad);
                 parent.x = min_x;
@@ -1517,12 +1760,7 @@ pub(super) fn build_subgraph_layouts(
         }
     }
 
-    subgraphs.sort_by(|a, b| {
-        let area_a = a.width * a.height;
-        let area_b = b.width * b.height;
-        area_b.partial_cmp(&area_a).unwrap_or(Ordering::Equal)
-    });
-    subgraphs
+    (subgraphs, graph_to_local)
 }
 
 #[cfg(test)]
@@ -1878,6 +2116,7 @@ mod tests {
         apply_subgraph_direction_overrides(
             &graph,
             &mut nodes,
+            &Theme::modern(),
             &LayoutConfig::default(),
             &HashSet::new(),
         );

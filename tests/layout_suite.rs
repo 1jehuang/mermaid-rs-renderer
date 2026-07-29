@@ -970,6 +970,169 @@ fn sankey_scc_member_order_follows_declaration_order_deterministically() {
     assert!(first["D"] > first["C"] && reordered["D"] > reordered["B"]);
 }
 
+/// Three frames of three stacked rows each, chained through their middle rows.
+fn three_stacked_frames_input() -> String {
+    let frames: String = ["A", "B", "C"]
+        .iter()
+        .map(|c| {
+            format!(
+                "  subgraph F{c}[\"frame {c}\"]\n    {c}1[\"row one\"]\n    {c}2[\"row two\"]\n\
+                     {c}3[\"row three\"]\n    {c}1 --- {c}2\n    {c}2 --- {c}3\n  end\n"
+            )
+        })
+        .collect();
+    format!("flowchart TB\n{frames}  A2 --> B2\n  B2 --> C2\n")
+}
+
+/// Chained subgraphs must stack in edge order, and that order must not depend
+/// on how tall the frame titles happen to render.
+///
+/// Ranking is subgraph-blind, so `B1`/`C1` (no incoming edge) used to land on
+/// rank 0 beside `A1`, leaving all three frames overlapping. The pass that
+/// pulled them apart then sorted on a bound that included the title padding,
+/// so a two-line title reordered the frames: here `foo()` is the only one-line
+/// title, which was enough to sink it below `main()`.
+#[test]
+fn chained_subgraphs_stack_in_edge_order_regardless_of_title_height() {
+    fn frame_tops(titles: [&str; 3]) -> [f32; 3] {
+        let [ta, tb, tc] = titles;
+        let input = format!(
+            "flowchart TB\n\
+             subgraph FA[\"{ta}\"]\n A1[\"a one\"]\n A2[\"a two\"]\n A3[\"a three\"]\n A1 --- A2\n A2 --- A3\n end\n\
+             subgraph FB[\"{tb}\"]\n B1[\"b one\"]\n B2[\"b two\"]\n B3[\"b three\"]\n B1 --- B2\n B2 --- B3\n end\n\
+             subgraph FC[\"{tc}\"]\n C1[\"c one\"]\n C2[\"c two\"]\n C3[\"c three\"]\n C1 --- C2\n C2 --- C3\n end\n\
+             A2 --> B2\n B2 --> C2\n"
+        );
+        let parsed = parse_mermaid(&input).expect("parse failed");
+        let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+        ["A", "B", "C"].map(|frame| {
+            (1..=3)
+                .map(|row| {
+                    let id = format!("{frame}{row}");
+                    layout.nodes.get(&id).unwrap_or_else(|| panic!("{id}")).y
+                })
+                .fold(f32::MAX, f32::min)
+        })
+    }
+
+    // The title lengths that originally broke it: only the middle frame fits
+    // on one line.
+    let uneven = frame_tops([
+        "baz() — innermost, lowest address",
+        "foo()",
+        "main() — outermost, highest address",
+    ]);
+    let even = frame_tops(["baz()", "foo()", "main()"]);
+
+    for (case, tops) in [("uneven titles", uneven), ("even titles", even)] {
+        assert!(
+            tops[0] < tops[1] && tops[1] < tops[2],
+            "{case}: frames must stack A -> B -> C, got tops {tops:?}"
+        );
+    }
+
+    // Each frame owns a contiguous rank band, so no two frames interleave.
+    let parsed = parse_mermaid(
+        "flowchart TB\n\
+         subgraph FA[\"one\"]\n A1 --- A2\n end\n\
+         subgraph FB[\"two\"]\n B1 --- B2\n end\n\
+         A2 --> B2\n",
+    )
+    .expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+    let bottom_of_a = ["A1", "A2"]
+        .iter()
+        .map(|id| {
+            let node = layout.nodes.get(*id).expect("node");
+            node.y + node.height
+        })
+        .fold(f32::MIN, f32::max);
+    let top_of_b = ["B1", "B2"]
+        .iter()
+        .map(|id| layout.nodes.get(*id).expect("node").y)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        bottom_of_a < top_of_b,
+        "frames must occupy disjoint rank bands, got A bottom {bottom_of_a} vs B top {top_of_b}"
+    );
+
+    // Rank bands also have to keep each frame's rows in one column. When the
+    // frames share ranks instead, a row is placed as a sibling of the *other*
+    // frames' rows and is dragged far across the diagram -- the frames still
+    // stack, but their contents scatter.
+    let parsed = parse_mermaid(&three_stacked_frames_input()).expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+    for frame in ["A", "B", "C"] {
+        let centres: Vec<f32> = (1..=3)
+            .map(|row| {
+                let id = format!("{frame}{row}");
+                let node = layout.nodes.get(&id).unwrap_or_else(|| panic!("{id}"));
+                node.x + node.width * 0.5
+            })
+            .collect();
+        let spread = centres.iter().fold(f32::MIN, |a, b| a.max(*b))
+            - centres.iter().fold(f32::MAX, |a, b| a.min(*b));
+        let widest = (1..=3)
+            .map(|row| layout.nodes[&format!("{frame}{row}")].width)
+            .fold(f32::MIN, f32::max);
+        assert!(
+            spread <= widest * 0.5,
+            "frame {frame} rows must stay in one column, centres {centres:?} spread {spread:.1}px for rows at most {widest:.1}px wide"
+        );
+    }
+}
+
+/// An edge between stacked frames must use the free channel beside them rather
+/// than climbing back over the source frame.
+///
+/// When a wide neighbour sits directly below the source and another directly
+/// above the target, every opposite-side port pairing is obstructed. The side
+/// search used to offer only those, so it picked the least-broken one: the
+/// route left `A2` rightward, climbed above the whole first frame, crossed to
+/// the far left, then dropped ~475px. Same-flank ports make it a straight drop.
+#[test]
+fn edges_between_stacked_frames_do_not_backtrack_over_the_source() {
+    let parsed = parse_mermaid(&three_stacked_frames_input()).expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+
+    for (from, to) in [("A2", "B2"), ("B2", "C2")] {
+        let edge = layout
+            .edges
+            .iter()
+            .find(|edge| edge.from == from && edge.to == to)
+            .unwrap_or_else(|| panic!("{from}->{to} edge"));
+
+        // In a TB flowchart a forward edge should never climb back up.
+        let backtrack: f32 = edge
+            .points
+            .windows(2)
+            .map(|seg| (seg[0].1 - seg[1].1).max(0.0))
+            .sum();
+        assert!(
+            backtrack <= 1.0,
+            "{from}->{to} climbs {backtrack:.1}px back up the diagram: {:?}",
+            edge.points
+        );
+
+        // The old route wandered far wider than the nodes it connects.
+        let from_node = layout.nodes.get(from).expect("source node");
+        let to_node = layout.nodes.get(to).expect("target node");
+        let widest = from_node.width.max(to_node.width);
+        let span = edge
+            .points
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+                (lo.min(p.0), hi.max(p.0))
+            });
+        assert!(
+            span.1 - span.0 <= widest,
+            "{from}->{to} spans {:.1}px horizontally for nodes only {widest:.1}px wide: {:?}",
+            span.1 - span.0,
+            edge.points
+        );
+    }
+}
+
 #[test]
 fn bidirectional_flowchart_labels_do_not_overlap() {
     let input = r#"flowchart TD
@@ -1639,4 +1802,120 @@ fn multiple_state_notes_on_one_side_search_outward() {
     );
     assert!(second.x > first.x, "later right note should move outward");
     assert!(second.x + second.width <= layout.width);
+}
+
+/// Conformance contract for nested subgraph layout, derived from mermaid's own
+/// rendering of the canonical nested-direction example (docs/flowchart syntax).
+///
+/// Cluster geometry used to be derived independently in several places, each
+/// re-ranking the *flattened* member list from a different origin, so they
+/// disagreed. It now comes from one recursive routine that sizes a cluster
+/// once, applies its `direction` once, and places it into its parent as a
+/// rigid sized block.
+#[test]
+fn nested_subgraph_layout_contract() {
+    let input = r#"flowchart LR
+  subgraph TOP
+    direction TB
+    subgraph B1
+        direction RL
+        i1 -->f1
+    end
+    subgraph B2
+        direction BT
+        i2 -->f2
+    end
+  end
+  A --> TOP --> B
+  B1 --> B2
+"#;
+    let parsed = parse_mermaid(input).expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+
+    let raw_sg = |label: &str| {
+        layout
+            .subgraphs
+            .iter()
+            .find(|s| s.label == label)
+            .unwrap_or_else(|| panic!("subgraph {label}"))
+    };
+    let sg = |label: &str| {
+        let s = raw_sg(label);
+        (s.x, s.y, s.x + s.width, s.y + s.height)
+    };
+    let nd = |id: &str| {
+        let n = layout.nodes.get(id).unwrap_or_else(|| panic!("node {id}"));
+        (n.x, n.y, n.x + n.width, n.y + n.height)
+    };
+    let inside = |i: (f32, f32, f32, f32), o: (f32, f32, f32, f32)| {
+        i.0 >= o.0 - 0.5 && i.1 >= o.1 - 0.5 && i.2 <= o.2 + 0.5 && i.3 <= o.3 + 0.5
+    };
+    let cy = |b: (f32, f32, f32, f32)| (b.1 + b.3) * 0.5;
+
+    let (top, b1, b2) = (sg("TOP"), sg("B1"), sg("B2"));
+    let (a, b) = (nd("A"), nd("B"));
+
+    // Parent flow is LR: A, then the TOP cluster as a unit, then B.
+    assert!(a.2 <= top.0, "A must sit entirely left of TOP");
+    assert!(top.2 <= b.0, "TOP must sit entirely left of B");
+
+    // A cluster behaves as one sized node, so its neighbours centre on it.
+    assert!((cy(a) - cy(top)).abs() <= 20.0, "A must be centred on TOP");
+    assert!((cy(b) - cy(top)).abs() <= 20.0, "B must be centred on TOP");
+
+    // TOP's own `direction TB` orders its children as whole blocks.
+    assert!(b1.3 <= b2.1, "TOP direction TB must put B1 above B2");
+
+    // Containment holds at every level.
+    assert!(inside(b1, top) && inside(b2, top), "children inside TOP");
+
+    // A parent's title band belongs to the parent: a nested child box starts
+    // below it, so the two labels never collide. Mermaid leaves 37.5px here.
+    let top_title = raw_sg("TOP").label_block.height;
+    assert!(
+        b1.1 - top.1 >= top_title,
+        "TOP's title band ({:.1}px) must clear B1's box, which starts {:.1}px below TOP",
+        top_title,
+        b1.1 - top.1
+    );
+
+    // Sibling clusters joined by an edge centre on each other along the parent's
+    // cross axis, exactly as two connected plain nodes would.
+    let cx = |b: (f32, f32, f32, f32)| (b.0 + b.2) * 0.5;
+    assert!(
+        (cx(b1) - cx(b2)).abs() <= 2.0,
+        "B1 and B2 must be centre-aligned in TOP's TB flow, got {:.1} vs {:.1}",
+        cx(b1),
+        cx(b2)
+    );
+    assert!(inside(nd("i1"), b1) && inside(nd("f1"), b1), "leaves in B1");
+    assert!(inside(nd("i2"), b2) && inside(nd("f2"), b2), "leaves in B2");
+
+    // Innermost directions still apply within their own cluster.
+    assert!(nd("f1").2 <= nd("i1").0, "B1 direction RL: f1 left of i1");
+    assert!(nd("f2").3 <= nd("i2").1, "B2 direction BT: f2 above i2");
+
+    // An edge between sibling clusters stays in their parent and flows with it.
+    let edge = layout
+        .edges
+        .iter()
+        .find(|e| e.from == "B1" && e.to == "B2")
+        .expect("B1->B2 edge");
+    let (min_x, max_x) = edge
+        .points
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            (lo.min(p.0), hi.max(p.0))
+        });
+    assert!(
+        min_x >= top.0 - 2.0 && max_x <= top.2 + 2.0,
+        "B1->B2 must stay within TOP, got x {min_x:.1}..{max_x:.1} vs TOP {:.1}..{:.1}",
+        top.0,
+        top.2
+    );
+    assert!(
+        edge.points.windows(2).all(|s| s[1].1 >= s[0].1 - 1.0),
+        "B1->B2 must flow downward with TOP's TB direction: {:?}",
+        edge.points
+    );
 }

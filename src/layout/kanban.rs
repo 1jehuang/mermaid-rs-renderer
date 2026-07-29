@@ -47,14 +47,8 @@ pub(super) fn compute_kanban_layout(
         }
         assigned.extend(column_nodes.iter().cloned());
 
-        let label_empty = sub.label.trim().is_empty();
-        let mut label_block = measure_label(&sub.label, theme, config);
-        if label_empty {
-            label_block.width = 0.0;
-            label_block.height = 0.0;
-        }
-        let (pad_x, _pad_y, top_padding) =
-            subgraph_padding_from_label(graph, sub, theme, &label_block);
+        let (label_block, (pad_x, _pad_y, top_padding)) =
+            subgraph_label_metrics(graph, sub, theme, config);
 
         let max_node_width = column_nodes
             .iter()
