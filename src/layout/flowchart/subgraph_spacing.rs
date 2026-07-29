@@ -222,21 +222,10 @@ pub(in crate::layout) fn debug_assert_flowchart_node_layout_invariants(
             continue;
         }
 
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, max_x, max_y)) = super::super::node_bounds(nodes, &sub.nodes)
+        else {
             continue;
-        }
+        };
         bounds.push(Bounds {
             label: sub.label.as_str(),
             min_x,
@@ -414,30 +403,13 @@ pub(in crate::layout) fn enforce_top_level_subgraph_gap(
             continue;
         }
 
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, max_x, max_y)) = super::super::node_bounds(nodes, &sub.nodes)
+        else {
             continue;
-        }
+        };
 
-        let label_empty = sub.label.trim().is_empty();
-        let mut label_block = measure_label(&sub.label, theme, config);
-        if label_empty {
-            label_block.width = 0.0;
-            label_block.height = 0.0;
-        }
-        let (pad_x, pad_y, top_padding) =
-            subgraph_padding_from_label(graph, sub, theme, &label_block);
+        let (_, (pad_x, pad_y, top_padding)) =
+            super::super::subgraph_label_metrics(graph, sub, theme, config);
 
         bounds.push(Bounds {
             idx,
@@ -716,18 +688,10 @@ pub(in crate::layout) fn align_disconnected_top_level_subgraphs(
         if sub.nodes.is_empty() {
             continue;
         }
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = super::super::node_bounds(
+            nodes, &sub.nodes,
+        )
+        .unwrap_or((f32::MAX, f32::MAX, f32::MIN, f32::MIN));
         let anchor_id = subgraph_anchor_id(sub, nodes).map(|id| id.to_string());
         if let Some(anchor) = anchor_id.as_deref().and_then(|id| nodes.get(id)) {
             min_x = min_x.min(anchor.x);
@@ -992,21 +956,10 @@ pub(in crate::layout) fn align_disconnected_components(
 
     let mut bounds: Vec<ComponentBounds> = Vec::new();
     for component in components {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &component {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, max_x, max_y)) = super::super::node_bounds(nodes, &component)
+        else {
             continue;
-        }
+        };
         bounds.push(ComponentBounds {
             nodes: component,
             min_x,

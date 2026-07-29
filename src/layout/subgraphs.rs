@@ -70,19 +70,7 @@ pub(super) fn apply_subgraph_bands(
         if bucket.is_empty() {
             continue;
         }
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in bucket {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-        if min_x != f32::MAX {
+        if let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, bucket) {
             groups.push((idx, min_x, min_y, max_x, max_y));
         }
     }
@@ -391,19 +379,9 @@ pub(super) fn apply_orthogonal_region_bands(
     for region_list in parent_map.values() {
         let mut region_boxes: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
         for &region_idx in region_list {
-            let mut min_x = f32::MAX;
-            let mut min_y = f32::MAX;
-            let mut max_x = f32::MIN;
-            let mut max_y = f32::MIN;
-            for node_id in &graph.subgraphs[region_idx].nodes {
-                if let Some(node) = nodes.get(node_id) {
-                    min_x = min_x.min(node.x);
-                    min_y = min_y.min(node.y);
-                    max_x = max_x.max(node.x + node.width);
-                    max_y = max_y.max(node.y + node.height);
-                }
-            }
-            if min_x != f32::MAX {
+            if let Some((min_x, min_y, max_x, max_y)) =
+                super::node_bounds(nodes, &graph.subgraphs[region_idx].nodes)
+            {
                 region_boxes.push((region_idx, min_x, min_y, max_x, max_y));
             }
         }
@@ -557,17 +535,9 @@ pub(super) fn apply_subgraph_direction_overrides(
             continue;
         }
 
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, _, _)) = super::node_bounds(nodes, &sub.nodes) else {
             continue;
-        }
+        };
 
         let mut temp_nodes: BTreeMap<String, NodeLayout> = BTreeMap::new();
         for node_id in &sub.nodes {
@@ -824,6 +794,27 @@ pub(super) fn subgraph_padding_from_label(
     (pad_x, pad_y, top_padding)
 }
 
+/// A subgraph's rendered title block and the padding its frame puts around its
+/// contents, as `(label_block, (pad_x, pad_y, top_padding))`.
+///
+/// An untitled subgraph measures as a zero-sized block so it gets no title
+/// band. Every caller needs that same pairing, so it lives here rather than
+/// being spelled out again at each frame-sizing site.
+pub(in crate::layout) fn subgraph_label_metrics(
+    graph: &Graph,
+    sub: &crate::ir::Subgraph,
+    theme: &Theme,
+    config: &LayoutConfig,
+) -> (TextBlock, (f32, f32, f32)) {
+    let mut label_block = measure_label(&sub.label, theme, config);
+    if sub.label.trim().is_empty() {
+        label_block.width = 0.0;
+        label_block.height = 0.0;
+    }
+    let padding = subgraph_padding_from_label(graph, sub, theme, &label_block);
+    (label_block, padding)
+}
+
 fn estimate_subgraph_box_size(
     graph: &Graph,
     sub: &crate::ir::Subgraph,
@@ -871,14 +862,8 @@ fn estimate_subgraph_box_size(
     if min_x == f32::MAX {
         return None;
     }
-    let label_empty = sub.label.trim().is_empty();
-    let mut label_block = measure_label(&sub.label, theme, config);
-    if label_empty {
-        label_block.width = 0.0;
-        label_block.height = 0.0;
-    }
-    let (padding_x, padding_y, top_padding) =
-        subgraph_padding_from_label(graph, sub, theme, &label_block);
+    let (_, (padding_x, padding_y, top_padding)) =
+        subgraph_label_metrics(graph, sub, theme, config);
 
     let width = (max_x - min_x) + padding_x * 2.0;
     let height = (max_y - min_y) + padding_y + top_padding;
@@ -1043,17 +1028,9 @@ pub(super) fn apply_state_subgraph_layouts(
         if skip_indices.contains(&idx) || sub.nodes.len() <= 1 {
             continue;
         }
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-            }
-        }
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, _, _)) = super::node_bounds(nodes, &sub.nodes) else {
             continue;
-        }
+        };
 
         let mut saved_sizes: Vec<(String, f32, f32)> = Vec::new();
         let mut inner_anchor_ids: Vec<String> = Vec::new();
@@ -1335,23 +1312,9 @@ fn mirror_subgraph_nodes(
     nodes: &mut BTreeMap<String, NodeLayout>,
     direction: Direction,
 ) {
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
-
-    for node_id in node_ids {
-        if let Some(node) = nodes.get(node_id) {
-            min_x = min_x.min(node.x);
-            min_y = min_y.min(node.y);
-            max_x = max_x.max(node.x + node.width);
-            max_y = max_y.max(node.y + node.height);
-        }
-    }
-
-    if min_x == f32::MAX {
+    let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, node_ids) else {
         return;
-    }
+    };
 
     if matches!(direction, Direction::RightLeft) {
         for node_id in node_ids {
@@ -1403,34 +1366,15 @@ pub(super) fn build_subgraph_layouts(
     // Maps graph.subgraphs index -> local subgraphs index (None if skipped).
     let mut graph_to_local: Vec<Option<usize>> = Vec::with_capacity(graph.subgraphs.len());
     for sub in &graph.subgraphs {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
-
-        if min_x == f32::MAX {
+        let Some((min_x, min_y, max_x, max_y)) = super::node_bounds(nodes, &sub.nodes) else {
             graph_to_local.push(None);
             continue;
-        }
+        };
 
         let style = resolve_subgraph_style(sub, graph);
-        let mut label_block = measure_label(&sub.label, theme, config);
         let label_empty = sub.label.trim().is_empty();
-        if label_empty {
-            label_block.width = 0.0;
-            label_block.height = 0.0;
-        }
-        let (padding_x, padding_y, top_padding) =
-            subgraph_padding_from_label(graph, sub, theme, &label_block);
+        let (label_block, (padding_x, padding_y, top_padding)) =
+            subgraph_label_metrics(graph, sub, theme, config);
 
         let node_width = max_x - min_x;
         let base_width = node_width + padding_x * 2.0;

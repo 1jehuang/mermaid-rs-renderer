@@ -888,6 +888,38 @@ fn assign_positions(
     }
 }
 
+/// Union of the rects of `ids` that are actually placed in `nodes`, as
+/// `(min_x, min_y, max_x, max_y)`. `None` when none of them is.
+///
+/// Subgraph geometry is derived from a member list in a dozen places; each one
+/// used to spell this loop out and re-check the `f32::MAX` sentinel by hand.
+pub(in crate::layout) fn node_bounds<I, S>(
+    nodes: &BTreeMap<String, NodeLayout>,
+    ids: I,
+) -> Option<(f32, f32, f32, f32)>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut bounds: Option<(f32, f32, f32, f32)> = None;
+    for id in ids {
+        let Some(node) = nodes.get(id.as_ref()) else {
+            continue;
+        };
+        let rect = (node.x, node.y, node.x + node.width, node.y + node.height);
+        bounds = Some(match bounds {
+            None => rect,
+            Some(acc) => (
+                acc.0.min(rect.0),
+                acc.1.min(rect.1),
+                acc.2.max(rect.2),
+                acc.3.max(rect.3),
+            ),
+        });
+    }
+    bounds
+}
+
 fn bounds_without_padding(
     nodes: &BTreeMap<String, NodeLayout>,
     subgraphs: &[SubgraphLayout],
@@ -1372,18 +1404,8 @@ fn push_non_members_out_of_subgraphs(
     // Compute subgraph bounds from their member nodes
     let mut sub_bounds: Vec<(f32, f32, f32, f32)> = Vec::new();
     for sub in &graph.subgraphs {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
+        let (min_x, min_y, max_x, max_y) =
+            node_bounds(nodes, &sub.nodes).unwrap_or((f32::MAX, f32::MAX, f32::MIN, f32::MIN));
         let (pad_x, pad_y, top_pad) = subgraph_padding_from_label(
             graph,
             sub,
