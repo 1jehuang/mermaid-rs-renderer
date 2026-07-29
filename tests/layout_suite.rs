@@ -1082,6 +1082,57 @@ fn chained_subgraphs_stack_in_edge_order_regardless_of_title_height() {
     }
 }
 
+/// An edge between stacked frames must use the free channel beside them rather
+/// than climbing back over the source frame.
+///
+/// When a wide neighbour sits directly below the source and another directly
+/// above the target, every opposite-side port pairing is obstructed. The side
+/// search used to offer only those, so it picked the least-broken one: the
+/// route left `A2` rightward, climbed above the whole first frame, crossed to
+/// the far left, then dropped ~475px. Same-flank ports make it a straight drop.
+#[test]
+fn edges_between_stacked_frames_do_not_backtrack_over_the_source() {
+    let parsed = parse_mermaid(&three_stacked_frames_input()).expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+
+    for (from, to) in [("A2", "B2"), ("B2", "C2")] {
+        let edge = layout
+            .edges
+            .iter()
+            .find(|edge| edge.from == from && edge.to == to)
+            .unwrap_or_else(|| panic!("{from}->{to} edge"));
+
+        // In a TB flowchart a forward edge should never climb back up.
+        let backtrack: f32 = edge
+            .points
+            .windows(2)
+            .map(|seg| (seg[0].1 - seg[1].1).max(0.0))
+            .sum();
+        assert!(
+            backtrack <= 1.0,
+            "{from}->{to} climbs {backtrack:.1}px back up the diagram: {:?}",
+            edge.points
+        );
+
+        // The old route wandered far wider than the nodes it connects.
+        let from_node = layout.nodes.get(from).expect("source node");
+        let to_node = layout.nodes.get(to).expect("target node");
+        let widest = from_node.width.max(to_node.width);
+        let span = edge
+            .points
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+                (lo.min(p.0), hi.max(p.0))
+            });
+        assert!(
+            span.1 - span.0 <= widest,
+            "{from}->{to} spans {:.1}px horizontally for nodes only {widest:.1}px wide: {:?}",
+            span.1 - span.0,
+            edge.points
+        );
+    }
+}
+
 #[test]
 fn bidirectional_flowchart_labels_do_not_overlap() {
     let input = r#"flowchart TD
