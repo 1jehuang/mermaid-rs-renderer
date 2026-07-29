@@ -392,6 +392,10 @@ pub(in crate::layout) fn enforce_top_level_subgraph_gap(
         max_x: f32,
         max_y: f32,
         pad_main: f32,
+        /// Main-axis start of the *member nodes*, before label padding is
+        /// applied. Padding depends on the title's wrapped height, so sorting
+        /// on the padded bound would let a two-line title reorder the frames.
+        content_main: f32,
     }
 
     let horizontal = is_horizontal(graph.direction);
@@ -418,6 +422,7 @@ pub(in crate::layout) fn enforce_top_level_subgraph_gap(
             max_x: max_x + pad_x,
             max_y: max_y + pad_y,
             pad_main: if horizontal { pad_x } else { pad_y },
+            content_main: if horizontal { min_x } else { min_y },
         });
     }
 
@@ -426,10 +431,8 @@ pub(in crate::layout) fn enforce_top_level_subgraph_gap(
     }
 
     bounds.sort_by(|a, b| {
-        let a_key = if horizontal { a.min_x } else { a.min_y };
-        let b_key = if horizontal { b.min_x } else { b.min_y };
-        a_key
-            .partial_cmp(&b_key)
+        a.content_main
+            .partial_cmp(&b.content_main)
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.idx.cmp(&b.idx))
     });

@@ -970,6 +970,118 @@ fn sankey_scc_member_order_follows_declaration_order_deterministically() {
     assert!(first["D"] > first["C"] && reordered["D"] > reordered["B"]);
 }
 
+/// Three frames of three stacked rows each, chained through their middle rows.
+fn three_stacked_frames_input() -> String {
+    let frames: String = ["A", "B", "C"]
+        .iter()
+        .map(|c| {
+            format!(
+                "  subgraph F{c}[\"frame {c}\"]\n    {c}1[\"row one\"]\n    {c}2[\"row two\"]\n\
+                     {c}3[\"row three\"]\n    {c}1 --- {c}2\n    {c}2 --- {c}3\n  end\n"
+            )
+        })
+        .collect();
+    format!("flowchart TB\n{frames}  A2 --> B2\n  B2 --> C2\n")
+}
+
+/// Chained subgraphs must stack in edge order, and that order must not depend
+/// on how tall the frame titles happen to render.
+///
+/// Ranking is subgraph-blind, so `B1`/`C1` (no incoming edge) used to land on
+/// rank 0 beside `A1`, leaving all three frames overlapping. The pass that
+/// pulled them apart then sorted on a bound that included the title padding,
+/// so a two-line title reordered the frames: here `foo()` is the only one-line
+/// title, which was enough to sink it below `main()`.
+#[test]
+fn chained_subgraphs_stack_in_edge_order_regardless_of_title_height() {
+    fn frame_tops(titles: [&str; 3]) -> [f32; 3] {
+        let [ta, tb, tc] = titles;
+        let input = format!(
+            "flowchart TB\n\
+             subgraph FA[\"{ta}\"]\n A1[\"a one\"]\n A2[\"a two\"]\n A3[\"a three\"]\n A1 --- A2\n A2 --- A3\n end\n\
+             subgraph FB[\"{tb}\"]\n B1[\"b one\"]\n B2[\"b two\"]\n B3[\"b three\"]\n B1 --- B2\n B2 --- B3\n end\n\
+             subgraph FC[\"{tc}\"]\n C1[\"c one\"]\n C2[\"c two\"]\n C3[\"c three\"]\n C1 --- C2\n C2 --- C3\n end\n\
+             A2 --> B2\n B2 --> C2\n"
+        );
+        let parsed = parse_mermaid(&input).expect("parse failed");
+        let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+        ["A", "B", "C"].map(|frame| {
+            (1..=3)
+                .map(|row| {
+                    let id = format!("{frame}{row}");
+                    layout.nodes.get(&id).unwrap_or_else(|| panic!("{id}")).y
+                })
+                .fold(f32::MAX, f32::min)
+        })
+    }
+
+    // The title lengths that originally broke it: only the middle frame fits
+    // on one line.
+    let uneven = frame_tops([
+        "baz() — innermost, lowest address",
+        "foo()",
+        "main() — outermost, highest address",
+    ]);
+    let even = frame_tops(["baz()", "foo()", "main()"]);
+
+    for (case, tops) in [("uneven titles", uneven), ("even titles", even)] {
+        assert!(
+            tops[0] < tops[1] && tops[1] < tops[2],
+            "{case}: frames must stack A -> B -> C, got tops {tops:?}"
+        );
+    }
+
+    // Each frame owns a contiguous rank band, so no two frames interleave.
+    let parsed = parse_mermaid(
+        "flowchart TB\n\
+         subgraph FA[\"one\"]\n A1 --- A2\n end\n\
+         subgraph FB[\"two\"]\n B1 --- B2\n end\n\
+         A2 --> B2\n",
+    )
+    .expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+    let bottom_of_a = ["A1", "A2"]
+        .iter()
+        .map(|id| {
+            let node = layout.nodes.get(*id).expect("node");
+            node.y + node.height
+        })
+        .fold(f32::MIN, f32::max);
+    let top_of_b = ["B1", "B2"]
+        .iter()
+        .map(|id| layout.nodes.get(*id).expect("node").y)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        bottom_of_a < top_of_b,
+        "frames must occupy disjoint rank bands, got A bottom {bottom_of_a} vs B top {top_of_b}"
+    );
+
+    // Rank bands also have to keep each frame's rows in one column. When the
+    // frames share ranks instead, a row is placed as a sibling of the *other*
+    // frames' rows and is dragged far across the diagram -- the frames still
+    // stack, but their contents scatter.
+    let parsed = parse_mermaid(&three_stacked_frames_input()).expect("parse failed");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+    for frame in ["A", "B", "C"] {
+        let centres: Vec<f32> = (1..=3)
+            .map(|row| {
+                let id = format!("{frame}{row}");
+                let node = layout.nodes.get(&id).unwrap_or_else(|| panic!("{id}"));
+                node.x + node.width * 0.5
+            })
+            .collect();
+        let spread = centres.iter().fold(f32::MIN, |a, b| a.max(*b))
+            - centres.iter().fold(f32::MAX, |a, b| a.min(*b));
+        let widest = (1..=3)
+            .map(|row| layout.nodes[&format!("{frame}{row}")].width)
+            .fold(f32::MIN, f32::max);
+        assert!(
+            spread <= widest * 0.5,
+            "frame {frame} rows must stay in one column, centres {centres:?} spread {spread:.1}px for rows at most {widest:.1}px wide"
+        );
+    }
+}
+
 #[test]
 fn bidirectional_flowchart_labels_do_not_overlap() {
     let input = r#"flowchart TD

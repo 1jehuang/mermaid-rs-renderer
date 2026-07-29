@@ -27,11 +27,138 @@ pub(super) fn rank_edges_for_manual_layout(
         covered.insert(edge.to.as_str());
     }
     let min_covered = layout_node_ids.len().div_ceil(2);
-    if covered.len() >= min_covered {
-        return primary;
+    let base = if covered.len() >= min_covered {
+        primary
+    } else {
+        layout_edges.to_vec()
+    };
+
+    with_subgraph_band_constraints(graph, layout_node_ids, layout_edges, base)
+}
+
+/// Cap on synthetic edges generated for one subgraph pair, so a pair of wide
+/// frames cannot blow the rank graph up quadratically.
+const MAX_BAND_CONSTRAINTS_PER_PAIR: usize = 64;
+
+/// Keep the members of chained subgraphs in disjoint rank bands.
+///
+/// Rank assignment is otherwise subgraph-blind: a member with no incoming edge
+/// (the top row of a frame) lands on rank 0 whichever subgraph it belongs to,
+/// so `A -> B -> C` chains leave all three frames starting on the same rank and
+/// overlapping. When a cross-subgraph edge orders two frames, every member of
+/// the source frame should rank before every member of the target frame; edges
+/// from the source's internal sinks to the target's internal sources impose
+/// exactly that. These are ranking-only inputs and are never rendered.
+///
+/// Deliberately conservative: nested subgraphs, overlapping membership, and
+/// mutually-connected frames are all left alone.
+fn with_subgraph_band_constraints(
+    graph: &Graph,
+    layout_node_ids: &[String],
+    layout_edges: &[crate::ir::Edge],
+    mut edges: Vec<crate::ir::Edge>,
+) -> Vec<crate::ir::Edge> {
+    let top_level = super::subgraphs::top_level_subgraph_indices(graph);
+    // Nested frames make "the band of a node" ambiguous, so only handle the
+    // flat case where every declared subgraph is top level.
+    if top_level.len() < 2 || top_level.len() != graph.subgraphs.len() {
+        return edges;
     }
 
-    layout_edges.to_vec()
+    let layout_set: HashSet<&str> = layout_node_ids.iter().map(String::as_str).collect();
+    let mut owner: HashMap<&str, usize> = HashMap::new();
+    for &idx in &top_level {
+        for member in &graph.subgraphs[idx].nodes {
+            if !layout_set.contains(member.as_str()) {
+                continue;
+            }
+            if owner.insert(member.as_str(), idx).is_some() {
+                // A node claimed by two frames: bands are not well defined.
+                return edges;
+            }
+        }
+    }
+
+    // Order frames by the real edges running between them, ignoring any pair
+    // that is connected both ways (that is a cycle, not a chain).
+    let mut forward: HashSet<(usize, usize)> = HashSet::new();
+    for edge in layout_edges {
+        let (Some(&from_sg), Some(&to_sg)) =
+            (owner.get(edge.from.as_str()), owner.get(edge.to.as_str()))
+        else {
+            continue;
+        };
+        if from_sg != to_sg {
+            forward.insert((from_sg, to_sg));
+        }
+    }
+    let mut pairs: Vec<(usize, usize)> = forward
+        .iter()
+        .copied()
+        .filter(|&(a, b)| !forward.contains(&(b, a)))
+        .collect();
+    if pairs.is_empty() {
+        return edges;
+    }
+    pairs.sort_unstable();
+
+    // Internal sinks/sources, computed over intra-frame edges only.
+    let mut has_incoming: HashSet<&str> = HashSet::new();
+    let mut has_outgoing: HashSet<&str> = HashSet::new();
+    for edge in layout_edges {
+        let (Some(&from_sg), Some(&to_sg)) =
+            (owner.get(edge.from.as_str()), owner.get(edge.to.as_str()))
+        else {
+            continue;
+        };
+        if from_sg == to_sg {
+            has_outgoing.insert(edge.from.as_str());
+            has_incoming.insert(edge.to.as_str());
+        }
+    }
+    let frame_members = |idx: usize| -> Vec<&str> {
+        graph.subgraphs[idx]
+            .nodes
+            .iter()
+            .map(String::as_str)
+            .filter(|id| layout_set.contains(id))
+            .collect()
+    };
+
+    let template = edges.first().or(layout_edges.first()).cloned();
+    let Some(template) = template else {
+        return edges;
+    };
+
+    for (from_sg, to_sg) in pairs {
+        let sinks: Vec<&str> = frame_members(from_sg)
+            .into_iter()
+            .filter(|id| !has_outgoing.contains(id))
+            .collect();
+        let sources: Vec<&str> = frame_members(to_sg)
+            .into_iter()
+            .filter(|id| !has_incoming.contains(id))
+            .collect();
+        if sinks.is_empty()
+            || sources.is_empty()
+            || sinks.len() * sources.len() > MAX_BAND_CONSTRAINTS_PER_PAIR
+        {
+            continue;
+        }
+        for sink in &sinks {
+            for source in &sources {
+                let mut constraint = template.clone();
+                constraint.from = (*sink).to_string();
+                constraint.to = (*source).to_string();
+                constraint.label = None;
+                constraint.start_label = None;
+                constraint.end_label = None;
+                edges.push(constraint);
+            }
+        }
+    }
+
+    edges
 }
 
 pub(super) fn order_rank_nodes(
