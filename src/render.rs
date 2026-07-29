@@ -6152,6 +6152,12 @@ fn edge_decoration_svg(
 }
 
 fn arrowhead_svg(point: (f32, f32), angle_deg: f32, stroke: &str, stroke_width: f32) -> String {
+    // `linkStyle ... stroke-width:0px` hides an edge; the arrowhead is a
+    // filled polygon rather than a stroked marker, so without this it would
+    // keep painting at the clamped minimum size and leave a stray tick behind.
+    if stroke_width <= 0.0 {
+        return String::new();
+    }
     let size = (stroke_width * 1.5 + 4.5).clamp(5.5, 10.0);
     let half = size * 0.52;
     let (x, y) = point;
