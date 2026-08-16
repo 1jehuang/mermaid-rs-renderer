@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: cachix/install-nix-action@v31.10.7
+      - uses: cachix/install-nix-action@v31.11.1
       - name: Evaluate all flake systems
         run: nix flake check --all-systems --no-build --print-build-logs
       - name: Build and smoke-test package
