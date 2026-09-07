@@ -502,3 +502,61 @@ Release process: see [docs/release.md](https://github.com/1jehuang/mermaid-rs-re
 ## License
 
 MIT
+
+
+### Native vector Scene API
+
+Enable the optional `scene` feature to draw diagrams with a desktop/GPU/vector
+renderer without a bitmap or SVG widget:
+
+```toml
+mermaid-rs-renderer = { version = "0.3.1", default-features = false, features = ["scene"] }
+```
+
+```rust
+use mermaid_rs_renderer::{render_scene, RenderOptions, SceneCommand};
+
+let scene = render_scene("flowchart TD; A[Start] --> B[Done]", RenderOptions::default())?;
+// Allocate the complete scene.width × scene.height canvas, then fit/scale it
+// uniformly into the host UI. Replay scene.commands in order.
+for command in &scene.commands {
+    if let SceneCommand::FillPath { path, paint, fill_rule } = command {
+        // Submit path to your native vector painter with paint and fill_rule.
+    }
+}
+```
+
+**Implementation today:** this is an SVG-normalized vector scene, not a direct
+layout backend. It reuses mmdr's existing strict parser, init directives, layout
+and SVG geometry, then normalizes the SVG with `usvg`. It never rasterizes and
+has no dependency on `resvg` unless the separate `png` feature is enabled.
+
+- `Scene { width, height, commands }` uses canvas-local logical pixels. ViewBox,
+  nested transforms and text placement are already applied. Clip to the canvas.
+- `FillPath` contains `MoveTo`, `LineTo`, `QuadTo`, `CubicTo`, and `Close` commands.
+  Text is shaped into glyph outlines using cached installed system fonts. No
+  text shaping or font lookup is required by the scene consumer, but outlines
+  do not retain selectable/accessibility text. Install suitable fonts for the
+  languages used. Output can vary with installed fonts.
+- Strokes are expanded into filled paths before transformation, preserving
+  width, caps, joins and dashes, including nonuniform transforms.
+- Paints are unpremultiplied sRGB `Color { r, g, b, a }` (RGB bytes, float alpha)
+  or padded linear gradients with explicit canvas-local endpoints and stops.
+  `FillRule` preserves nonzero/even-odd filling.
+- Replay balanced `PushClip`/`PopClip` and `PushLayer`/`PopLayer` commands.
+  Layers require **group** opacity and `Normal`/`Multiply` blending, not
+  per-primitive alpha multiplication. XY charts use plot clips, Sankey links
+  use linear gradients and multiply blending, and pie slices use group opacity.
+  A painter lacking these operations must report or explicitly document any
+  approximation rather than silently discard them.
+- All 23 current diagram kinds are covered by scene regression fixtures. C4
+  person icons now use a shared vector silhouette instead of an embedded PNG,
+  so both SVG and Scene output remain vector at every scale.
+- Embedded images/bitmap glyphs, radial gradients, patterns, masks, filters,
+  other blend modes and complex clip unions return errors rather than trigger
+  raster fallback. No implicit opaque background is added beyond the existing
+  SVG emitter's theme background.
+
+`render_scene(input, RenderOptions)` returns `anyhow::Result<Scene>` and preserves
+strict `ParseError` diagnostics through `anyhow` downcasting. The scene types are
+available both at the crate root and in `mermaid_rs_renderer::scene`.

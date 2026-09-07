@@ -80,6 +80,8 @@
 //!
 //! - **`cli`** (default) - CLI binary support. Disable for library-only usage.
 //! - **`png`** (default) - PNG output via resvg. Disable for SVG-only usage.
+//! - **`scene`** (optional) - Renderer-neutral native vector commands via SVG/usvg
+//!   normalization. Independent of `png` and `cli`, with no rasterization.
 //!
 //! For minimal dependencies (e.g., embedding in other tools like Zola):
 //!
@@ -98,6 +100,8 @@ pub mod layout;
 pub mod layout_dump;
 pub mod parser;
 pub mod render;
+#[cfg(feature = "scene")]
+pub mod scene;
 mod text_metrics;
 pub mod theme;
 pub(crate) mod unicode_width;
@@ -121,6 +125,10 @@ pub use parser::{ParseOutput, parse_mermaid};
 #[cfg(feature = "png")]
 pub use render::write_output_png;
 pub use render::{SvgDimensions, measure_svg_dimensions, render_svg, write_output_svg};
+#[cfg(feature = "scene")]
+pub use scene::{
+    BlendMode, Color, FillRule, GradientStop, Paint, PathCommand, Scene, SceneCommand, render_scene,
+};
 pub use theme::Theme;
 
 /// Options for the high-level `render` function.

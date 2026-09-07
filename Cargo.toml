@@ -43,6 +43,8 @@ default = ["cli", "png"]
 cli = ["dep:clap"]
 # PNG output support (adds resvg/usvg dependencies)
 png = ["dep:resvg", "dep:usvg"]
+# Renderer-neutral vector scene (no rasterizer or CLI required)
+scene = ["dep:usvg"]
 # Criterion microbenchmarks (kept behind a feature so normal builds and
 # `cargo test --all-targets` skip the criterion dependency stack)
 benchmark = ["dep:criterion"]
