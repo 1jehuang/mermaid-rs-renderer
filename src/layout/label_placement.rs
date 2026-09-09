@@ -843,7 +843,23 @@ fn nudge_flowchart_labels_clear_of_own_paths(edges: &mut [EdgeLayout], bounds: O
             (-0.707, 0.707),
             (0.707, 0.707),
         ];
-        for step in [2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0] {
+        // A label only needs to escape its own path by roughly half of its
+        // larger dimension plus the path's local extent. Small labels clear
+        // within the original 32px ceiling, but a large multi-line label on a
+        // short edge (the box can be taller than the edge's cross-axis span)
+        // needs a much larger displacement. Extend the step ladder to scale
+        // with the label so big labels can clear instead of being left
+        // overlapping their route. This pass runs last and only touches labels
+        // that already intersect their own path, so it cannot move a
+        // previously-clear label.
+        let reach = (label.width.max(label.height) + 48.0).max(64.0);
+        let mut steps = vec![2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0];
+        let mut extra = 40.0;
+        while extra <= reach {
+            steps.push(extra);
+            extra += 8.0;
+        }
+        for step in steps {
             for (dx, dy) in directions {
                 let mut candidate = (center.0 + dx * step, center.1 + dy * step);
                 if let Some(bound) = bounds {
