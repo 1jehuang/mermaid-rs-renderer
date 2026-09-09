@@ -736,7 +736,14 @@ fn compute_flowchart_layout(
         config,
     );
 
-    apply_subgraph_node_layout_passes(graph, &mut nodes, config, &anchored_indices, &anchor_info);
+    apply_subgraph_node_layout_passes(
+        graph,
+        &mut nodes,
+        theme,
+        config,
+        &anchored_indices,
+        &anchor_info,
+    );
 
     flowchart::subgraph_spacing::apply_flowchart_node_layout_cleanup(
         graph, &mut nodes, theme, config,
@@ -749,7 +756,7 @@ fn compute_flowchart_layout(
         &effective_config,
         fold_outcome.is_some(),
     );
-    apply_subgraph_direction_overrides(graph, &mut nodes, config, &anchored_indices);
+    apply_subgraph_direction_overrides(graph, &mut nodes, theme, config, &anchored_indices);
     // Objective and direction passes can shift whole top-level groups after the
     // initial subgraph cleanup. Re-apply the non-overlap spacing constraints
     // before subgraph boxes are materialized so dense cross-subgraph flowcharts
@@ -865,9 +872,32 @@ fn assign_positions(
         bucket.sort_by_key(|id| node_order.get(id.as_str()).copied().unwrap_or(usize::MAX));
     }
 
+    // Cross extent of every rank, so the ranks can be centred on each other
+    // rather than flush-aligned against the leading edge. Two nodes joined
+    // across ranks then line up on their centres, which is what a reader
+    // expects of a straight edge between them.
+    let cross_extents: Vec<f32> = rank_nodes
+        .iter()
+        .map(|bucket| {
+            let mut extent = 0.0f32;
+            for node_id in bucket {
+                if let Some(node) = nodes.get(node_id.as_str()) {
+                    let size = if is_horizontal(direction) {
+                        node.height
+                    } else {
+                        node.width
+                    };
+                    extent += size + config.node_spacing;
+                }
+            }
+            (extent - config.node_spacing).max(0.0)
+        })
+        .collect();
+    let widest_rank = cross_extents.iter().copied().fold(0.0f32, f32::max);
+
     let mut main_cursor = 0.0;
-    for bucket in rank_nodes {
-        let mut cross_cursor = 0.0;
+    for (rank, bucket) in rank_nodes.into_iter().enumerate() {
+        let mut cross_cursor = (widest_rank - cross_extents[rank]) * 0.5;
         let mut max_main: f32 = 0.0;
         for node_id in bucket {
             if let Some(node) = nodes.get_mut(&node_id) {
@@ -886,6 +916,38 @@ fn assign_positions(
         }
         main_cursor += max_main + config.rank_spacing;
     }
+}
+
+/// Union of the rects of `ids` that are actually placed in `nodes`, as
+/// `(min_x, min_y, max_x, max_y)`. `None` when none of them is.
+///
+/// Subgraph geometry is derived from a member list in a dozen places; each one
+/// used to spell this loop out and re-check the `f32::MAX` sentinel by hand.
+pub(in crate::layout) fn node_bounds<I, S>(
+    nodes: &BTreeMap<String, NodeLayout>,
+    ids: I,
+) -> Option<(f32, f32, f32, f32)>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut bounds: Option<(f32, f32, f32, f32)> = None;
+    for id in ids {
+        let Some(node) = nodes.get(id.as_ref()) else {
+            continue;
+        };
+        let rect = (node.x, node.y, node.x + node.width, node.y + node.height);
+        bounds = Some(match bounds {
+            None => rect,
+            Some(acc) => (
+                acc.0.min(rect.0),
+                acc.1.min(rect.1),
+                acc.2.max(rect.2),
+                acc.3.max(rect.3),
+            ),
+        });
+    }
+    bounds
 }
 
 fn bounds_without_padding(
@@ -1372,18 +1434,8 @@ fn push_non_members_out_of_subgraphs(
     // Compute subgraph bounds from their member nodes
     let mut sub_bounds: Vec<(f32, f32, f32, f32)> = Vec::new();
     for sub in &graph.subgraphs {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-        for node_id in &sub.nodes {
-            if let Some(node) = nodes.get(node_id) {
-                min_x = min_x.min(node.x);
-                min_y = min_y.min(node.y);
-                max_x = max_x.max(node.x + node.width);
-                max_y = max_y.max(node.y + node.height);
-            }
-        }
+        let (min_x, min_y, max_x, max_y) =
+            node_bounds(nodes, &sub.nodes).unwrap_or((f32::MAX, f32::MAX, f32::MIN, f32::MIN));
         let (pad_x, pad_y, top_pad) = subgraph_padding_from_label(
             graph,
             sub,

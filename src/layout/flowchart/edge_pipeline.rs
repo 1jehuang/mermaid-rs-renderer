@@ -657,6 +657,65 @@ fn candidate_vertical_sides(from: &NodeLayout, to: &NodeLayout) -> (EdgeSide, Ed
     }
 }
 
+/// Lateral "sidestep" ports for a main-axis edge: leave and re-enter on the
+/// same flank so the route can use a free channel running alongside the nodes.
+///
+/// When the corridor between two stacked nodes is blocked at both ends -- a
+/// wide neighbour directly below the source and another directly above the
+/// target -- every opposite-side pairing has to cut back across the diagram to
+/// reach a clear channel. Exiting and entering on the same flank lets the route
+/// drop straight down that channel instead. The nearer flank is offered first
+/// so it survives a tight `max_candidates` budget.
+///
+/// Only offered when the edge leaves one subgraph frame for another. That is
+/// where the blocked corridor comes from: the frames themselves fill the main
+/// axis between the two nodes, so no ordinary pairing has anywhere to go. Among
+/// free-standing nodes the corridor is open and the conventional pairings route
+/// it well, while a same-flank offer there only displaces the port assignment
+/// of the neighbours that share those sides.
+fn sidestep_side_candidates(
+    from: &NodeLayout,
+    to: &NodeLayout,
+    direction: crate::ir::Direction,
+    obstacles: &[Obstacle],
+) -> Option<[(EdgeSide, EdgeSide, bool); 2]> {
+    let crosses_frame = obstacles.iter().any(|obstacle| {
+        obstacle
+            .members
+            .as_ref()
+            .is_some_and(|members| members.contains(&from.id) != members.contains(&to.id))
+    });
+    if !crosses_frame {
+        return None;
+    }
+
+    let from_c = node_center(from);
+    let to_c = node_center(to);
+    Some(if is_horizontal(direction) {
+        if to_c.1 <= from_c.1 {
+            [
+                (EdgeSide::Top, EdgeSide::Top, false),
+                (EdgeSide::Bottom, EdgeSide::Bottom, false),
+            ]
+        } else {
+            [
+                (EdgeSide::Bottom, EdgeSide::Bottom, false),
+                (EdgeSide::Top, EdgeSide::Top, false),
+            ]
+        }
+    } else if to_c.0 <= from_c.0 {
+        [
+            (EdgeSide::Left, EdgeSide::Left, false),
+            (EdgeSide::Right, EdgeSide::Right, false),
+        ]
+    } else {
+        [
+            (EdgeSide::Right, EdgeSide::Right, false),
+            (EdgeSide::Left, EdgeSide::Left, false),
+        ]
+    })
+}
+
 fn branching_fan_side_candidates(
     from: &NodeLayout,
     to: &NodeLayout,
@@ -935,6 +994,7 @@ fn collect_routed_side_candidates(
     edge_role: roles::FlowchartEdgeRole,
     graph_direction: crate::ir::Direction,
     content_bounds: Option<NodeBounds>,
+    obstacles: &[Obstacle],
     limit: usize,
 ) -> Vec<(EdgeSide, EdgeSide, bool)> {
     let mut candidates = Vec::with_capacity(limit.max(1));
@@ -972,6 +1032,13 @@ fn collect_routed_side_candidates(
             choose_outer_back_edge_sides(from, to, graph_direction, content_bounds, balanced),
             limit,
         );
+    }
+    // Offered last, so they only fill slots the conventional pairings left free.
+    for sidestep in sidestep_side_candidates(from, to, graph_direction, obstacles)
+        .into_iter()
+        .flatten()
+    {
+        push_unique_side_candidate_limited(&mut candidates, sidestep, limit);
     }
     candidates
 }
@@ -1117,6 +1184,7 @@ fn choose_routed_flowchart_sides(
         edge_role,
         ctx.graph_direction,
         ctx.content_bounds,
+        ctx.obstacles,
         ctx.profile.max_candidates,
     );
 
@@ -1539,6 +1607,7 @@ fn refine_flowchart_ports_with_route_candidates(
             edge_role,
             ctx.graph.direction,
             ctx.content_bounds,
+            ctx.obstacles,
             ctx.profile.max_candidates,
         );
         // Back edges have their sides chosen deliberately so they exit into an
@@ -3294,6 +3363,7 @@ mod tests {
             roles::FlowchartEdgeRole::default(),
             crate::ir::Direction::TopDown,
             None,
+            &[],
             3,
         );
         assert_eq!(bounded.len(), 3);
