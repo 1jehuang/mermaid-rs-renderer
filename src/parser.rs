@@ -265,6 +265,81 @@ fn has_missing_flowchart_edge_endpoint(line: &str) -> bool {
         .any(|m| trimmed[..m.start()].trim().is_empty() || trimmed[m.end()..].trim().is_empty())
 }
 
+/// Shortest valid Mermaid link token (`-->`, `---`, `-.-`, `==>`, `<--`).
+/// `ARROW_TOKEN_RE` also matches a lone `-` or `=`, which appears inside
+/// ordinary node ids, so length is what separates a link from a hyphen.
+const MIN_EDGE_TOKEN_LEN: usize = 3;
+
+/// Whether the line opens with an edge operator, i.e. it is the tail of a
+/// statement whose source node sits on an earlier line.
+fn starts_with_edge_token(line: &str) -> bool {
+    let masked = mask_bracket_content(line);
+    let trimmed = masked.trim_start();
+    ARROW_TOKEN_RE
+        .find(trimmed)
+        .is_some_and(|m| m.start() == 0 && m.len() >= MIN_EDGE_TOKEN_LEN)
+}
+
+/// Whether a previous statement may absorb a following edge continuation.
+/// Headers and keyword statements never can, so a malformed document still
+/// fails loudly instead of folding an edge into `flowchart TD`.
+fn accepts_edge_continuation(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.ends_with(';') {
+        return false;
+    }
+    if HEADER_RE.is_match(trimmed) || SUBGRAPH_RE.is_match(trimmed) {
+        return false;
+    }
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    !matches!(
+        first_word,
+        "end"
+            | "classDef"
+            | "class"
+            | "style"
+            | "linkStyle"
+            | "click"
+            | "direction"
+            | "accTitle"
+            | "accDescr"
+            | "title"
+    )
+}
+
+/// Mermaid.js lexes flowchart edge operators as `\s*[xo<]?\-\-+[-xo>]\s*`
+/// (`flow.jison`), and `\s` matches newlines, so an edge operator is allowed to
+/// begin on its own line and continue the statement above it. Fold those
+/// continuation lines back onto their statement before parsing, so
+///
+/// ```text
+/// A
+///   --> B
+///   --> C
+/// ```
+///
+/// parses exactly like `A --> B --> C`.
+fn join_flowchart_edge_continuations(lines: Vec<String>) -> Vec<String> {
+    let mut joined: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in lines {
+        let continues_previous = joined
+            .last()
+            .is_some_and(|previous| accepts_edge_continuation(previous))
+            && starts_with_edge_token(&line);
+
+        match joined.last_mut() {
+            Some(previous) if continues_previous => {
+                previous.push(' ');
+                previous.push_str(line.trim_start());
+            }
+            _ => joined.push(line),
+        }
+    }
+
+    joined
+}
+
 fn preprocess_input(input: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
     let mut init_config: Option<serde_json::Value> = None;
     let mut lines = Vec::new();
@@ -339,6 +414,7 @@ fn parse_flowchart(input: &str) -> Result<ParseOutput> {
     let mut subgraph_stack: Vec<usize> = Vec::new();
 
     let (lines, init_config) = preprocess_input(input)?;
+    let lines = join_flowchart_edge_continuations(lines);
 
     for raw_line in lines {
         for line in split_statements(&raw_line) {
@@ -7705,6 +7781,52 @@ A["foo & bar"] & B --> C"#;
             line.len(),
             masked.len(),
             "masked string should have same byte length as original"
+        );
+    }
+
+    #[test]
+    fn parse_edge_operator_on_continuation_line() {
+        // Mermaid.js allows whitespace, including newlines, before an edge
+        // operator, so this chain is equivalent to `A --> B --> C`.
+        let input = "flowchart TD\n  A\n    --> B\n    --> C\n";
+        let parsed = parse_mermaid(input).unwrap();
+        let edges: Vec<(&str, &str)> = parsed
+            .graph
+            .edges
+            .iter()
+            .map(|edge| (edge.from.as_str(), edge.to.as_str()))
+            .collect();
+        assert_eq!(edges, vec![("A", "B"), ("B", "C")]);
+    }
+
+    #[test]
+    fn parse_labelled_edge_operator_on_continuation_line() {
+        let input = "flowchart LR\n  A[Start]\n    -->|yes| B[Stop]\n";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(parsed.graph.edges[0].from, "A");
+        assert_eq!(parsed.graph.edges[0].to, "B");
+        assert_eq!(parsed.graph.edges[0].label.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn continuation_join_does_not_absorb_keyword_statements() {
+        // A leading edge operator after a header has no source node, so the
+        // document must still fail rather than fold into `flowchart TD`.
+        assert!(parse_mermaid("flowchart TD\n  --> B\n").is_err());
+        assert!(parse_mermaid("flowchart TD\n  subgraph S\n  --> B\n  end\n").is_err());
+    }
+
+    #[test]
+    fn short_dash_token_does_not_join_lines() {
+        // `ARROW_TOKEN_RE` also matches a lone `-`, which is not a link token.
+        // Joining on one would quietly turn this already-invalid document into
+        // an `A -b[Node]` edge, so the minimum token length preserves the
+        // pre-existing parse error instead of inventing an edge.
+        let err = parse_mermaid("flowchart LR\n  A\n  -b[Node]\n").unwrap_err();
+        assert!(
+            err.to_string().contains("invalid flowchart edge syntax"),
+            "unexpected error: {err}"
         );
     }
 }
