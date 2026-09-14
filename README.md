@@ -126,6 +126,9 @@ cargo install --path .
 # Homebrew (macOS/Linux)
 brew tap 1jehuang/mmdr && brew install mmdr
 
+# mise
+mise use -g github:1jehuang/mermaid-rs-renderer@0.3.1
+
 # Scoop (Windows)
 scoop bucket add mmdr https://github.com/1jehuang/scoop-mmdr && scoop install mmdr
 
