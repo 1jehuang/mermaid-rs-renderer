@@ -14,7 +14,7 @@ pub(super) fn measure_label(text: &str, theme: &Theme, config: &LayoutConfig) ->
         text,
         measure_font_size,
         config,
-        true,
+        config.wrap_labels,
         theme.font_family.as_str(),
     )
 }
@@ -658,5 +658,30 @@ mod tests {
         let config = LayoutConfig::default();
         let block = measure_label("", &theme, &config);
         assert_eq!(block.lines.len(), 1);
+    }
+
+    #[test]
+    fn measure_label_wraps_at_spaces_by_default() {
+        let theme = Theme::modern();
+        let mut config = LayoutConfig::default();
+        config.max_label_width_chars = 8;
+        let block = measure_label("this is a long label", &theme, &config);
+        assert!(block.lines.len() > 1);
+    }
+
+    #[test]
+    fn measure_label_wrap_labels_false_keeps_one_line_per_explicit_newline() {
+        let theme = Theme::modern();
+        let mut config = LayoutConfig::default();
+        config.max_label_width_chars = 8;
+        config.wrap_labels = false;
+        let block = measure_label("this is a long label", &theme, &config);
+        assert_eq!(block.lines, vec!["this is a long label".to_string()]);
+
+        let block = measure_label("first line\nsecond line", &theme, &config);
+        assert_eq!(
+            block.lines,
+            vec!["first line".to_string(), "second line".to_string()]
+        );
     }
 }
