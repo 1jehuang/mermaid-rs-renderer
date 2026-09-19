@@ -757,6 +757,10 @@ impl Default for TreemapConfig {
     }
 }
 
+fn default_wrap_labels() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayoutConfig {
     pub node_spacing: f32,
@@ -765,6 +769,14 @@ pub struct LayoutConfig {
     pub node_padding_y: f32,
     pub label_line_height: f32,
     pub max_label_width_chars: usize,
+    /// Whether `measure_label` may split a label at a space once it exceeds
+    /// `max_label_width_chars`. When `false`, a label wraps only at explicit
+    /// `\n` (each such segment becomes exactly one line, regardless of
+    /// width). `#[serde(default...)]` so a `LayoutConfig` deserialized from a
+    /// config file predating this field still parses, taking the prior
+    /// (always-wrap) behavior.
+    #[serde(default = "default_wrap_labels")]
+    pub wrap_labels: bool,
     pub preferred_aspect_ratio: Option<f32>,
     pub fast_text_metrics: bool,
     pub requirement: RequirementConfig,
@@ -825,6 +837,7 @@ impl Default for LayoutConfig {
             node_padding_y: 15.0,
             label_line_height: 1.5,
             max_label_width_chars: 22,
+            wrap_labels: true,
             preferred_aspect_ratio: None,
             fast_text_metrics: false,
             requirement: RequirementConfig::default(),
