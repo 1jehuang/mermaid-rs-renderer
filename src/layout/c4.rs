@@ -1,4 +1,5 @@
 use super::*;
+use crate::metrics::TextMetrics;
 
 pub(super) fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout {
     let c4 = &graph.c4;
@@ -67,6 +68,7 @@ pub(super) fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout 
         &boundary_map,
         conf,
         fast_metrics,
+        config.metrics.as_deref(),
     );
 
     for rel in &c4.rels {
@@ -84,10 +86,17 @@ pub(super) fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout 
             label_font_size,
             0.0,
             conf.wrap,
-            estimate_text_width(&rel.label, label_font_size, rel_font_family, fast_metrics),
+            estimate_text_width(
+                &rel.label,
+                label_font_size,
+                rel_font_family,
+                fast_metrics,
+                config.metrics.as_deref(),
+            ),
             c4_text_line_height(conf, label_font_size),
             rel_font_family,
             fast_metrics,
+            config.metrics.as_deref(),
         );
         let techn_layout = rel.techn.as_ref().map(|t| {
             c4_text_layout(
@@ -95,10 +104,17 @@ pub(super) fn compute_c4_layout(graph: &Graph, config: &LayoutConfig) -> Layout 
                 label_font_size,
                 0.0,
                 conf.wrap,
-                estimate_text_width(t, label_font_size, rel_font_family, fast_metrics),
+                estimate_text_width(
+                    t,
+                    label_font_size,
+                    rel_font_family,
+                    fast_metrics,
+                    config.metrics.as_deref(),
+                ),
                 c4_text_line_height(conf, label_font_size),
                 rel_font_family,
                 fast_metrics,
+                config.metrics.as_deref(),
             )
         });
         let waypoints = c4_route_around_shapes(start, end, &rel.from, &rel.to, &shapes_out);
@@ -319,6 +335,7 @@ fn layout_c4_boundaries(
     boundary_map: &std::collections::HashMap<String, &crate::ir::C4Boundary>,
     conf: &crate::config::C4Config,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) {
     if boundary_ids.is_empty() {
         return;
@@ -344,6 +361,7 @@ fn layout_c4_boundaries(
             c4_text_line_height(conf, label_font_size),
             boundary_font_family,
             fast_metrics,
+            metrics,
         );
         y = label_layout.y + label_layout.height;
         let mut boundary_type_layout = None;
@@ -358,6 +376,7 @@ fn layout_c4_boundaries(
                 c4_text_line_height(conf, conf.boundary_font_size),
                 boundary_font_family,
                 fast_metrics,
+                metrics,
             );
             y = type_layout.y + type_layout.height;
             boundary_type_layout = Some(type_layout);
@@ -373,6 +392,7 @@ fn layout_c4_boundaries(
                 c4_text_line_height(conf, (conf.boundary_font_size - 2.0).max(1.0)),
                 boundary_font_family,
                 fast_metrics,
+                metrics,
             );
             y = descr_layout.y + descr_layout.height;
             boundary_descr_layout = Some(descr_layout);
@@ -413,6 +433,7 @@ fn layout_c4_boundaries(
                 shape_map,
                 conf,
                 fast_metrics,
+                metrics,
             );
         }
 
@@ -430,6 +451,7 @@ fn layout_c4_boundaries(
                 boundary_map,
                 conf,
                 fast_metrics,
+                metrics,
             );
         }
 
@@ -470,6 +492,7 @@ fn layout_c4_shapes(
     shape_map: &std::collections::HashMap<String, &crate::ir::C4Shape>,
     conf: &crate::config::C4Config,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) {
     for shape_id in shape_ids {
         let Some(shape) = shape_map.get(shape_id) else {
@@ -483,6 +506,7 @@ fn layout_c4_shapes(
             type_font_size,
             type_font_family,
             fast_metrics,
+            metrics,
         );
         let type_height = type_font_size + 2.0;
         let type_layout = C4TextLayout {
@@ -518,6 +542,7 @@ fn layout_c4_shapes(
             c4_text_line_height(conf, label_font_size),
             label_font_family,
             fast_metrics,
+            metrics,
         );
         y = label_layout.y + label_layout.height;
 
@@ -539,6 +564,7 @@ fn layout_c4_shapes(
                 c4_text_line_height(conf, font_size),
                 font_family,
                 fast_metrics,
+                metrics,
             );
             y = layout.y + layout.height;
             type_or_techn_layout = Some(layout);
@@ -559,6 +585,7 @@ fn layout_c4_shapes(
                 c4_text_line_height(conf, font_size),
                 font_family,
                 fast_metrics,
+                metrics,
             );
             y = layout.y + layout.height;
             rect_width = rect_width.max(layout.width);
@@ -664,6 +691,7 @@ fn c4_text_layout(
     line_height: f32,
     font_family: &str,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) -> C4TextLayout {
     let mut lines = Vec::new();
     for raw in split_lines(text) {
@@ -674,6 +702,7 @@ fn c4_text_layout(
                 font_size,
                 font_family,
                 fast_metrics,
+                metrics,
             ));
         } else {
             lines.push(raw);
@@ -684,7 +713,7 @@ fn c4_text_layout(
     }
     let width = lines
         .iter()
-        .map(|line| estimate_text_width(line, font_size, font_family, fast_metrics))
+        .map(|line| estimate_text_width(line, font_size, font_family, fast_metrics, metrics))
         .fold(0.0, f32::max);
     let height = line_height * lines.len().max(1) as f32;
     C4TextLayout {
@@ -702,6 +731,7 @@ fn wrap_text_to_width(
     font_size: f32,
     font_family: &str,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = String::new();
@@ -711,7 +741,8 @@ fn wrap_text_to_width(
         } else {
             format!("{} {}", current, word)
         };
-        if estimate_text_width(&candidate, font_size, font_family, fast_metrics) <= max_width
+        if estimate_text_width(&candidate, font_size, font_family, fast_metrics, metrics)
+            <= max_width
             || current.is_empty()
         {
             current = candidate;
@@ -729,7 +760,18 @@ fn wrap_text_to_width(
     lines
 }
 
-fn estimate_text_width(text: &str, font_size: f32, font_family: &str, fast_metrics: bool) -> f32 {
+fn estimate_text_width(
+    text: &str,
+    font_size: f32,
+    font_family: &str,
+    fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
+) -> f32 {
+    if let Some(width) =
+        metrics.and_then(|metrics| metrics.measure_text_width(text, font_size, font_family))
+    {
+        return width;
+    }
     if fast_metrics && text.is_ascii() {
         return text.chars().map(c4_char_width_factor).sum::<f32>() * font_size;
     }

@@ -199,10 +199,11 @@ pub(super) fn compute_pie_layout(graph: &Graph, theme: &Theme, config: &LayoutCo
                 continue;
             }
             let percent_text = format!("{:.0}%", slice.value / total * 100.0);
-            let percent_width = crate::text_metrics::measure_text_width(
+            let percent_width = crate::text_metrics::measure(
                 percent_text.as_str(),
                 theme.pie_section_text_size,
                 theme.font_family.as_str(),
+                config.metrics.as_deref(),
             )
             .unwrap_or(percent_text.chars().count() as f32 * theme.pie_section_text_size * 0.55);
             let arc_len = radius * span;

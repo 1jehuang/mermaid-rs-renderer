@@ -775,6 +775,10 @@ pub struct LayoutConfig {
     pub treemap: TreemapConfig,
     pub flowchart: FlowchartLayoutConfig,
     pub timeline: TimelineConfig,
+    /// Host-supplied text metrics. `None` measures with the system font
+    /// database, as the library always has. Not part of the JSON config.
+    #[serde(skip)]
+    pub metrics: Option<std::sync::Arc<dyn crate::metrics::TextMetrics>>,
 }
 
 /// Selects the layered node-placement implementation used by graph diagrams.
@@ -835,6 +839,7 @@ impl Default for LayoutConfig {
             treemap: TreemapConfig::default(),
             flowchart: FlowchartLayoutConfig::default(),
             timeline: TimelineConfig::default(),
+            metrics: None,
         }
     }
 }

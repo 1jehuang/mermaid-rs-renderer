@@ -8,6 +8,7 @@ use crate::layout::{
     C4BoundaryLayout, C4Layout, C4RelLayout, C4ShapeLayout, DiagramData, ErrorLayout,
     GitGraphLayout, JourneyLayout, Layout, PieData, SankeyLayout, SubgraphLayout, TextBlock,
 };
+use crate::metrics::TextMetrics;
 use crate::text_metrics;
 use crate::theme::{Theme, adjust_color, parse_color_to_hsl};
 use anyhow::Result;
@@ -3217,9 +3218,13 @@ fn render_pie(pie: &PieData, theme: &Theme, config: &LayoutConfig) -> String {
         let mid_angle = (slice.start_angle + slice.end_angle) / 2.0;
         let font_size = theme.pie_section_text_size;
         let arc_len = radius * span;
-        let percent_width =
-            text_metrics::measure_text_width(&percent_text, font_size, theme.font_family.as_str())
-                .unwrap_or(percent_text.chars().count() as f32 * font_size * 0.55);
+        let percent_width = text_metrics::measure(
+            &percent_text,
+            font_size,
+            theme.font_family.as_str(),
+            config.metrics.as_deref(),
+        )
+        .unwrap_or(percent_text.chars().count() as f32 * font_size * 0.55);
         let outside = !suppress_outside_labels
             && crate::layout::pie_label_is_outside(arc_len, percent_width, span);
         let label_text = if outside {
@@ -3331,10 +3336,11 @@ fn render_pie(pie: &PieData, theme: &Theme, config: &LayoutConfig) -> String {
                 lx = label_x,
                 ly = label.y
             ));
-            let label_width = text_metrics::measure_text_width(
+            let label_width = text_metrics::measure(
                 label.text.as_str(),
                 label.font_size,
                 theme.font_family.as_str(),
+                config.metrics.as_deref(),
             )
             .unwrap_or(label.text.chars().count() as f32 * label.font_size * 0.55);
             let pad_x = crate::layout::pie_outside_label_pad_x(label.font_size);
@@ -3777,10 +3783,11 @@ fn render_gantt(
                 .unwrap_or("");
             if !label_text.is_empty() {
                 let font_size = task_font * 0.95;
-                let text_width = text_metrics::measure_text_width(
+                let text_width = text_metrics::measure(
                     label_text,
                     font_size,
                     theme.font_family.as_str(),
+                    config.metrics.as_deref(),
                 )
                 .unwrap_or(label_text.chars().count() as f32 * font_size * 0.55);
                 let pad = (font_size * 0.6).max(6.0);
@@ -5458,10 +5465,11 @@ fn render_er_node_label(
                 use_columns = false;
                 break;
             }
-            let width = text_metrics::measure_text_width(
+            let width = text_metrics::measure(
                 first,
                 theme.font_size,
                 theme.font_family.as_str(),
+                config.metrics.as_deref(),
             )
             .unwrap_or(first.chars().count() as f32 * theme.font_size * 0.6);
             max_type_width = max_type_width.max(width);
@@ -5694,10 +5702,11 @@ fn er_badge_svg(
     fill: &str,
     text_color: &str,
     font_family: &str,
+    metrics: Option<&dyn TextMetrics>,
 ) -> (String, f32) {
     let font_family = normalize_font_family(font_family);
     let pad_x = (font_size * 0.45).max(4.0);
-    let text_width = text_metrics::measure_text_width(text, font_size * 0.72, &font_family)
+    let text_width = text_metrics::measure(text, font_size * 0.72, &font_family, metrics)
         .unwrap_or(font_size * 0.9);
     let width = text_width + pad_x * 2.0;
     let height = (font_size * 0.9).max(10.0);
@@ -5805,22 +5814,33 @@ fn render_er_node(
     let mut max_badge_width = 0.0f32;
     for attr in &attrs {
         if !attr.data_type.is_empty()
-            && let Some(width) =
-                text_metrics::measure_text_width(&attr.data_type, font_size, &theme.font_family)
+            && let Some(width) = text_metrics::measure(
+                &attr.data_type,
+                font_size,
+                &theme.font_family,
+                config.metrics.as_deref(),
+            )
         {
             max_type_width = max_type_width.max(width);
         }
-        if let Some(width) =
-            text_metrics::measure_text_width(&attr.name, font_size, &theme.font_family)
-        {
+        if let Some(width) = text_metrics::measure(
+            &attr.name,
+            font_size,
+            &theme.font_family,
+            config.metrics.as_deref(),
+        ) {
             max_name_width = max_name_width.max(width);
         }
         if !attr.keys.is_empty() {
             let mut row_badge_width = 0.0f32;
             for key in attr.keys.iter().take(2) {
-                let text_width =
-                    text_metrics::measure_text_width(key, font_size * 0.72, &theme.font_family)
-                        .unwrap_or(font_size * 0.9);
+                let text_width = text_metrics::measure(
+                    key,
+                    font_size * 0.72,
+                    &theme.font_family,
+                    config.metrics.as_deref(),
+                )
+                .unwrap_or(font_size * 0.9);
                 let badge_width = text_width + (font_size * 0.45).max(4.0) * 2.0;
                 row_badge_width += badge_width + font_size * 0.4;
             }
@@ -5912,6 +5932,7 @@ fn render_er_node(
                 fill,
                 "#FFFFFF",
                 &theme.font_family,
+                config.metrics.as_deref(),
             );
             svg.push_str(&badge_svg);
             cursor_x += badge_width + font_size * 0.4;

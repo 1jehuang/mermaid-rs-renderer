@@ -57,6 +57,7 @@ use xychart::*;
 
 use crate::config::{FlowchartLayoutEngine, LayoutConfig, PieRenderMode, TreemapRenderMode};
 use crate::ir::{Direction, Graph};
+use crate::metrics::TextMetrics;
 use crate::text_metrics;
 use crate::theme::{Theme, adjust_color, parse_color_to_hsl};
 use std::borrow::Cow;

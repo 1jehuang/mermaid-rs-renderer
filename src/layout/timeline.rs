@@ -94,6 +94,7 @@ pub(super) fn compute_timeline_layout(
                         font_size,
                         theme.font_family.as_str(),
                         config.fast_text_metrics,
+                        config.metrics.as_deref(),
                     )
                 })
                 .fold(0.0, f32::max);
@@ -106,6 +107,7 @@ pub(super) fn compute_timeline_layout(
                         event_font_size,
                         theme.font_family.as_str(),
                         config.fast_text_metrics,
+                        config.metrics.as_deref(),
                     )
                 })
                 .fold(time_width, f32::max);

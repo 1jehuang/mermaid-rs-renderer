@@ -98,6 +98,7 @@ pub mod error;
 pub mod ir;
 pub mod layout;
 pub mod layout_dump;
+pub mod metrics;
 pub mod parser;
 pub mod render;
 #[cfg(feature = "scene")]
@@ -121,6 +122,7 @@ pub use layout::{
     NodeLayout, SubgraphLayout, compute_layout, compute_layout_with_metrics,
     write_layered_layout_dump,
 };
+pub use metrics::TextMetrics;
 pub use parser::{ParseOutput, parse_mermaid};
 #[cfg(feature = "png")]
 pub use render::write_output_png;

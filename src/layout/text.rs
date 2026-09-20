@@ -1,4 +1,5 @@
 use crate::config::LayoutConfig;
+use crate::metrics::TextMetrics;
 use crate::text_metrics;
 use crate::theme::Theme;
 use crate::unicode_width::{Cluster, consume_cluster, is_cjk_wide_char};
@@ -32,6 +33,7 @@ pub(super) fn measure_label_with_font_size(
         font_size,
         font_family,
         fast_metrics,
+        config.metrics.as_deref(),
     );
     measure_label_with_max_width(text, font_size, max_width_px, config, wrap, font_family)
 }
@@ -47,10 +49,19 @@ pub(super) fn measure_label_with_max_width(
     let raw_lines = split_lines(text);
     let mut lines = Vec::new();
     let fast_metrics = config.fast_text_metrics;
+    let metrics = config.metrics.as_deref();
+    // A host's measurement may legitimately be narrower than a character.
     let max_width = max_width.max(0.0);
     for line in raw_lines {
         if wrap {
-            let wrapped = wrap_line(&line, max_width, font_size, font_family, fast_metrics);
+            let wrapped = wrap_line(
+                &line,
+                max_width,
+                font_size,
+                font_family,
+                fast_metrics,
+                metrics,
+            );
             lines.extend(wrapped);
         } else {
             lines.push(line);
@@ -64,9 +75,9 @@ pub(super) fn measure_label_with_max_width(
     let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1);
     let measured_width = lines
         .iter()
-        .map(|line| text_width(line, font_size, font_family, fast_metrics))
+        .map(|line| text_width(line, font_size, font_family, fast_metrics, metrics))
         .fold(0.0, f32::max);
-    let avg_char = average_char_width(font_family, font_size, fast_metrics);
+    let avg_char = average_char_width(font_family, font_size, fast_metrics, metrics);
     let guard_width = max_len as f32 * avg_char;
     // Keep the historical guard against under-measured font metrics. The
     // wrapping fix lives in `wrap_line`: oversized tokens are split before
@@ -389,8 +400,9 @@ pub(super) fn wrap_line(
     font_size: f32,
     font_family: &str,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) -> Vec<String> {
-    if text_width(line, font_size, font_family, fast_metrics) <= max_width {
+    if text_width(line, font_size, font_family, fast_metrics, metrics) <= max_width {
         return vec![line.to_string()];
     }
 
@@ -402,7 +414,7 @@ pub(super) fn wrap_line(
         } else {
             format!("{} {}", current, word)
         };
-        if text_width(&candidate, font_size, font_family, fast_metrics) > max_width {
+        if text_width(&candidate, font_size, font_family, fast_metrics, metrics) > max_width {
             if !current.is_empty() {
                 lines.push(std::mem::take(&mut current));
             }
@@ -411,7 +423,13 @@ pub(super) fn wrap_line(
                 let mut candidate = chunk.clone();
                 candidate.push(ch);
                 if !chunk.is_empty()
-                    && text_width(&candidate, font_size, font_family, fast_metrics) > max_width
+                    && text_width(
+                        &candidate,
+                        font_size,
+                        font_family,
+                        fast_metrics,
+                        metrics,
+                    ) > max_width
                 {
                     lines.push(std::mem::take(&mut chunk));
                 }
@@ -428,7 +446,18 @@ pub(super) fn wrap_line(
     lines
 }
 
-pub(super) fn text_width(text: &str, font_size: f32, font_family: &str, fast_metrics: bool) -> f32 {
+pub(super) fn text_width(
+    text: &str,
+    font_size: f32,
+    font_family: &str,
+    fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
+) -> f32 {
+    if let Some(width) =
+        metrics.and_then(|metrics| metrics.measure_text_width(text, font_size, font_family))
+    {
+        return width;
+    }
     if fast_metrics && text.is_ascii() {
         return fallback_text_width(text, font_size);
     }
@@ -455,7 +484,17 @@ fn fallback_text_width(text: &str, font_size: f32) -> f32 {
     width * font_size
 }
 
-fn average_char_width(font_family: &str, font_size: f32, fast_metrics: bool) -> f32 {
+fn average_char_width(
+    font_family: &str,
+    font_size: f32,
+    fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
+) -> f32 {
+    if let Some(width) =
+        metrics.and_then(|metrics| metrics.average_char_width(font_family, font_size))
+    {
+        return width;
+    }
     if fast_metrics {
         return font_size * 0.56;
     }
@@ -467,8 +506,9 @@ fn max_label_width_px(
     font_size: f32,
     font_family: &str,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) -> f32 {
-    let avg_char = average_char_width(font_family, font_size, fast_metrics);
+    let avg_char = average_char_width(font_family, font_size, fast_metrics, metrics);
     (max_chars.max(1) as f32) * avg_char
 }
 
@@ -534,9 +574,36 @@ mod tests {
         );
     }
 
+    /// Measures every character as one em, which the built-in estimates never
+    /// do, so a width can only come from here.
+    #[derive(Debug)]
+    struct OneEm;
+
+    impl TextMetrics for OneEm {
+        fn measure_text_width(
+            &self,
+            text: &str,
+            font_size: f32,
+            _font_family: &str,
+        ) -> Option<f32> {
+            Some(text.chars().count() as f32 * font_size)
+        }
+    }
+
+    #[test]
+    fn fast_metrics_still_ask_the_host_first() {
+        let width = text_width("Hello", 10.0, "serif", true, Some(&OneEm));
+        assert_eq!(width, 50.0);
+        let average = average_char_width("serif", 10.0, true, Some(&OneEm));
+        assert_eq!(average, 10.0);
+        // Without a host, the fast estimates stand.
+        assert!(text_width("Hello", 10.0, "serif", true, None) < 50.0);
+        assert_eq!(average_char_width("serif", 10.0, true, None), 5.6);
+    }
+
     #[test]
     fn wrap_line_does_not_wrap_short_text() {
-        let result = wrap_line("short", 1000.0, 16.0, "sans-serif", true);
+        let result = wrap_line("short", 1000.0, 16.0, "sans-serif", true, None);
         assert_eq!(result.len(), 1);
     }
 
@@ -548,13 +615,14 @@ mod tests {
             16.0,
             "sans-serif",
             true,
+            None,
         );
         assert!(result.len() > 1, "expected wrapping, got {:?}", result);
     }
 
     #[test]
     fn wrap_line_splits_long_ascii_token_into_longest_fitting_chunks() {
-        let result = wrap_line("abcdefghij", 30.0, 16.0, "sans-serif", true);
+        let result = wrap_line("abcdefghij", 30.0, 16.0, "sans-serif", true, None);
         assert_eq!(result.concat(), "abcdefghij");
         assert!(result.len() > 1);
         assert!(
@@ -574,7 +642,7 @@ mod tests {
     fn wrap_line_uses_longest_fitting_chunks_for_mixed_width_unicode() {
         let text = "Wi中i界W";
         let max_width = 20.0;
-        let result = wrap_line(text, max_width, 16.0, "sans-serif", true);
+        let result = wrap_line(text, max_width, 16.0, "sans-serif", true, None);
         assert_eq!(result.concat(), text);
 
         let mut consumed = 0;
@@ -590,14 +658,14 @@ mod tests {
 
     #[test]
     fn wrap_line_splits_unicode_only_at_char_boundaries() {
-        let result = wrap_line("你好世界测试", 32.0, 16.0, "sans-serif", true);
+        let result = wrap_line("你好世界测试", 32.0, 16.0, "sans-serif", true, None);
         assert_eq!(result.concat(), "你好世界测试");
         assert_eq!(result, vec!["你好", "世界", "测试"]);
     }
 
     #[test]
     fn wrap_line_makes_progress_when_width_is_smaller_than_one_character() {
-        let result = wrap_line("wide", 0.1, 16.0, "sans-serif", true);
+        let result = wrap_line("wide", 0.1, 16.0, "sans-serif", true, None);
         assert_eq!(result, vec!["w", "i", "d", "e"]);
     }
 
@@ -612,7 +680,7 @@ mod tests {
         let rendered_width = block
             .lines
             .iter()
-            .map(|line| text_width(line, 16.0, "sans-serif", true))
+            .map(|line| text_width(line, 16.0, "sans-serif", true, None))
             .fold(0.0, f32::max);
         assert_eq!(block.width, rendered_width);
         assert!(block.width > 0.1);
@@ -638,7 +706,7 @@ mod tests {
             block
                 .lines
                 .iter()
-                .all(|line| { text_width(line, 16.0, "sans-serif", true) <= max_width })
+                .all(|line| text_width(line, 16.0, "sans-serif", true, None) <= max_width)
         );
     }
 

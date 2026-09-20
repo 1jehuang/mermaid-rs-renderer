@@ -44,6 +44,7 @@ pub(super) fn compute_gitgraph_layout(
             gg.text_width_scale,
             theme.font_family.as_str(),
             config.fast_text_metrics,
+            config.metrics.as_deref(),
         );
         let spacing_rotate_extra = if gg.rotate_commit_label {
             gg.branch_spacing_rotate_extra
@@ -153,6 +154,7 @@ pub(super) fn compute_gitgraph_layout(
                 gg.text_width_scale,
                 theme.font_family.as_str(),
                 config.fast_text_metrics,
+                config.metrics.as_deref(),
             );
             let (text_x, text_y, bg_x, bg_y, transform) = if is_vertical {
                 let text_x = x - (label_width + gg.commit_label_tb_text_extra);
@@ -224,6 +226,7 @@ pub(super) fn compute_gitgraph_layout(
                     gg.text_width_scale,
                     theme.font_family.as_str(),
                     config.fast_text_metrics,
+                    config.metrics.as_deref(),
                 );
                 max_width = max_width.max(w);
                 max_height = max_height.max(h);
@@ -532,11 +535,12 @@ fn measure_gitgraph_text(
     width_scale: f32,
     font_family: &str,
     fast_metrics: bool,
+    metrics: Option<&dyn TextMetrics>,
 ) -> (f32, f32) {
     let lines = split_lines(text);
     let max_width = lines
         .iter()
-        .map(|line| text_width(line, font_size, font_family, fast_metrics))
+        .map(|line| text_width(line, font_size, font_family, fast_metrics, metrics))
         .fold(0.0, f32::max);
     let width = max_width * width_scale;
     let height = lines.len() as f32 * font_size * line_height;

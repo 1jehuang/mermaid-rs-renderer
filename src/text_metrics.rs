@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use ttf_parser::{Face, GlyphId};
 
+use crate::metrics::TextMetrics;
 use crate::unicode_width::{Cluster, consume_cluster, is_cjk_wide_char};
 
 static TEXT_MEASURER: Lazy<Mutex<TextMeasurer>> = Lazy::new(|| Mutex::new(TextMeasurer::new()));
@@ -18,6 +19,21 @@ pub fn measure_text_width(text: &str, font_size: f32, font_family: &str) -> Opti
     }
     let mut guard = TEXT_MEASURER.lock().ok()?;
     guard.measure(text, font_size, font_family)
+}
+
+/// The host's measurement first, the system database second.
+pub(crate) fn measure(
+    text: &str,
+    font_size: f32,
+    font_family: &str,
+    metrics: Option<&dyn TextMetrics>,
+) -> Option<f32> {
+    if text.is_empty() || font_size <= 0.0 {
+        return Some(0.0);
+    }
+    metrics
+        .and_then(|metrics| metrics.measure_text_width(text, font_size, font_family))
+        .or_else(|| measure_text_width(text, font_size, font_family))
 }
 
 pub fn average_char_width(font_family: &str, font_size: f32) -> Option<f32> {
