@@ -93,3 +93,9 @@ required-features = ["benchmark"]
 name = "mmdr"
 path = "src/main.rs"
 required-features = ["cli"]
+
+# Part of the wasm32-time-fix patch: wasm32-unknown-unknown's std does not
+# implement time, so stage timing panics there. web-time re-exports std's
+# Instant on every other target, so this is a no-op off wasm.
+[dependencies.web-time]
+version = "1"

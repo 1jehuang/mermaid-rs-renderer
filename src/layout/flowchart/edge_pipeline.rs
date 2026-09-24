@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::Instant;
+// `std::time::Instant` is unimplemented on wasm32-unknown-unknown, where the
+// standard library has no time source; web-time re-exports the std type on
+// every other target and reads the browser clock under wasm.
+use web_time::Instant;
 
 use crate::config::LayoutConfig;
 use crate::ir::{DiagramKind, Graph};

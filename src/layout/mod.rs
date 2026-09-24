@@ -62,7 +62,10 @@ use crate::theme::{Theme, adjust_color, parse_color_to_hsl};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::Instant;
+// `std::time::Instant` is unimplemented on wasm32-unknown-unknown, where the
+// standard library has no time source; web-time re-exports the std type on
+// every other target and reads the browser clock under wasm.
+use web_time::Instant;
 
 // Label placement padding (resolved per diagram kind).
 // Minimum padding around the entire layout bounding box.
