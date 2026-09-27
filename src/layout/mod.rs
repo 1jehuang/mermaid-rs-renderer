@@ -23,6 +23,7 @@ mod text;
 mod timeline;
 mod treemap;
 pub(crate) mod types;
+pub(crate) mod venn;
 mod xychart;
 use architecture::*;
 use block::*;
@@ -53,6 +54,7 @@ use text::*;
 use timeline::*;
 use treemap::*;
 pub use types::*;
+use venn::compute_venn_layout;
 use xychart::*;
 
 use crate::config::{FlowchartLayoutEngine, LayoutConfig, PieRenderMode, TreemapRenderMode};
@@ -194,6 +196,7 @@ pub fn compute_layout_with_metrics(
         crate::ir::DiagramKind::Sankey => compute_sankey_layout(graph, theme, config),
         crate::ir::DiagramKind::Architecture => compute_architecture_layout(graph, theme, config),
         crate::ir::DiagramKind::Radar => compute_radar_layout(graph, theme, config),
+        crate::ir::DiagramKind::Venn => compute_venn_layout(graph, theme, config),
         crate::ir::DiagramKind::Treemap => {
             if config.treemap.render_mode == TreemapRenderMode::Error {
                 compute_error_layout(graph, config)

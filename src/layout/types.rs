@@ -480,6 +480,49 @@ pub struct RadarLayout {
     pub graticule: crate::ir::RadarGraticule,
 }
 
+/// One Venn set's circle, in canvas coordinates.
+#[derive(Debug, Clone)]
+pub struct VennCircleLayout {
+    pub set: String,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    /// Index into the theme's palette, in declared order.
+    pub color_index: usize,
+}
+
+/// A set's or a union's label, centred in its region.
+#[derive(Debug, Clone)]
+pub struct VennLabelLayout {
+    /// The region (sorted set identifiers).
+    pub sets: Vec<String>,
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// A `text` item, centred at (`x`, `y`) in its region's grid.
+#[derive(Debug, Clone)]
+pub struct VennTextLayout {
+    pub id: String,
+    pub sets: Vec<String>,
+    pub lines: TextBlock,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Structural Venn layout (`venn-beta`).
+#[derive(Debug, Clone)]
+pub struct VennLayout {
+    pub title: Option<String>,
+    pub circles: Vec<VennCircleLayout>,
+    pub labels: Vec<VennLabelLayout>,
+    pub texts: Vec<VennTextLayout>,
+    /// Every union's sets (sorted), for filling the regions styled `fill`.
+    pub unions: Vec<Vec<String>>,
+    pub styles: Vec<crate::ir::VennStyle>,
+}
+
 #[derive(Debug, Clone)]
 pub enum DiagramData {
     Graph { state_notes: Vec<StateNoteLayout> },
@@ -494,6 +537,7 @@ pub enum DiagramData {
     Timeline(TimelineLayout),
     Journey(JourneyLayout),
     Radar(RadarLayout),
+    Venn(VennLayout),
     Error(ErrorLayout),
 }
 

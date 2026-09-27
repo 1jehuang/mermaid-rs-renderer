@@ -95,6 +95,7 @@ fn all_23_diagram_kinds_produce_vector_scenes() {
         "architecture",
         "radar",
         "treemap",
+        "venn",
     ] {
         let input = std::fs::read_to_string(format!(
             "{}/benches/fixtures/{name}_medium.mmd",

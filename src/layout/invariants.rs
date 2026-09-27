@@ -752,6 +752,25 @@ pub fn validate_layout_invariants(layout: &Layout) -> Result<(), Vec<LayoutInvar
         DiagramData::Radar(radar) => {
             let _ = radar;
         }
+        DiagramData::Venn(venn) => {
+            for (idx, circle) in venn.circles.iter().enumerate() {
+                let path = format!("venn.circles[{idx}]");
+                check_point(&mut errors, &path, (circle.x, circle.y));
+                check_finite_positive(&mut errors, &format!("{path}.radius"), circle.radius);
+            }
+            for (idx, label) in venn.labels.iter().enumerate() {
+                check_point(
+                    &mut errors,
+                    &format!("venn.labels[{idx}]"),
+                    (label.x, label.y),
+                );
+            }
+            for (idx, text) in venn.texts.iter().enumerate() {
+                let path = format!("venn.texts[{idx}]");
+                check_point(&mut errors, &path, (text.x, text.y));
+                check_text_block(&mut errors, &format!("{path}.lines"), &text.lines);
+            }
+        }
         DiagramData::Error(error) => {
             for (path, value) in [
                 ("error.viewbox_width", error.viewbox_width),

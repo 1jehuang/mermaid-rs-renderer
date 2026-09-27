@@ -413,6 +413,12 @@ pub fn render_svg_with_dimensions(
         return svg;
     }
 
+    if layout.kind == crate::ir::DiagramKind::Venn {
+        svg.push_str(&render_venn(layout, theme));
+        svg.push_str("</svg>");
+        return svg;
+    }
+
     if layout.kind == crate::ir::DiagramKind::Requirement {
         svg.push_str(&render_requirement(layout, theme, config));
         svg.push_str("</svg>");
@@ -2358,6 +2364,206 @@ fn render_error(layout: &ErrorLayout, _theme: &Theme, _config: &LayoutConfig) ->
     ));
     svg.push_str("</g>");
 
+    svg
+}
+
+/// mermaid.js's `venn1`…`venn8`: the theme's own when it sets them, otherwise
+/// as its default, base and forest themes derive them: the primary, secondary
+/// and tertiary colours 30 points darker (the tertiary 40), then the primary
+/// and secondary turned by 60 and 120 degrees. On a dark background they are
+/// lightened instead, as the dark theme does. A colour that does not parse
+/// falls back to the pie palette.
+fn venn_palette(theme: &Theme, dark: bool) -> Vec<String> {
+    if !theme.venn_colors.is_empty() {
+        return theme.venn_colors.clone();
+    }
+    let adjust = |color: &str, dh: f32, dl: f32, fallback: usize| -> String {
+        venn_shift(color, dh, dl, dark)
+            .unwrap_or_else(|| theme.pie_colors[fallback % theme.pie_colors.len()].clone())
+    };
+    let (p, s, t) = (
+        &theme.primary_color,
+        &theme.secondary_color,
+        &theme.tertiary_color,
+    );
+    vec![
+        adjust(p, 0.0, 30.0, 0),
+        adjust(s, 0.0, 30.0, 1),
+        adjust(t, 0.0, 40.0, 2),
+        adjust(p, 60.0, 30.0, 3),
+        adjust(p, -60.0, 30.0, 4),
+        adjust(s, 60.0, 30.0, 5),
+        adjust(p, 120.0, 30.0, 6),
+        adjust(s, 120.0, 30.0, 7),
+    ]
+}
+
+/// `color` turned `dh` degrees and made `dl` points darker, or lighter on a
+/// dark background.
+fn venn_shift(color: &str, dh: f32, dl: f32, dark: bool) -> Option<String> {
+    let (h, s, l) = crate::theme::parse_color_to_hsl(color)?;
+    let l = if dark { l + dl } else { l - dl }.clamp(0.0, 100.0);
+    Some(format!(
+        "hsl({:.1}, {s:.1}%, {l:.1}%)",
+        (h + dh).rem_euclid(360.0)
+    ))
+}
+
+/// A Venn diagram, drawn as mermaid.js's default look draws it: each set a
+/// palette colour at 10% fill with a full-colour outline, its label in a
+/// darker shade of that colour (lighter on a dark background), union labels
+/// in the text colour, and a union filled only when a `style` gives it `fill`.
+fn render_venn(layout: &Layout, theme: &Theme) -> String {
+    use crate::layout::venn::{
+        LABEL_FONT_SIZE, STROKE_WIDTH, TEXT_FONT_SIZE, TITLE_FONT_SIZE, WIDTH,
+    };
+    let DiagramData::Venn(venn) = &layout.diagram else {
+        return String::new();
+    };
+    // `style` statements, later ones winning, keyed as mermaid.js keys them.
+    let style = |key: &str, prop: &str| -> Option<String> {
+        venn.styles
+            .iter()
+            .filter(|entry| entry.targets.join("|") == key)
+            .flat_map(|entry| entry.styles.iter())
+            .rfind(|(k, _)| k == prop)
+            .map(|(_, v)| v.clone())
+    };
+    // A background that is not a colour (`none`, for a page showing through)
+    // is judged by the text instead: light text means a dark page.
+    let lightness = |c: &str| crate::theme::parse_color_to_hsl(c).map(|(_, _, l)| l);
+    let dark = match lightness(&theme.background) {
+        Some(l) => l < 50.0,
+        None => lightness(&theme.text_color).is_some_and(|l| l > 50.0),
+    };
+    let shade = |color: &str| venn_shift(color, 0.0, 30.0, dark);
+    let font = normalize_font_family(&theme.font_family);
+    let palette = venn_palette(theme, dark);
+    let base_of = |circle: &crate::layout::VennCircleLayout| -> String {
+        style(&circle.set, "fill")
+            .unwrap_or_else(|| palette[circle.color_index % palette.len()].clone())
+    };
+    let text = |class: &str, x: f32, y: f32, size: f32, color: &str, content: &str| {
+        format!(
+            "<text class=\"{}\" x=\"{:.3}\" y=\"{:.3}\" text-anchor=\"middle\" dominant-baseline=\"middle\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>",
+            class,
+            x,
+            y,
+            font,
+            size,
+            escape_xml(color),
+            escape_xml(content)
+        )
+    };
+    let mut svg = String::new();
+
+    if let Some(title) = &venn.title {
+        svg.push_str(&text(
+            "venn-title",
+            WIDTH / 2.0,
+            TITLE_FONT_SIZE,
+            TITLE_FONT_SIZE,
+            &theme.text_color,
+            title,
+        ));
+    }
+
+    // Clip paths for the unions that are filled.
+    let filled: Vec<&Vec<String>> = venn
+        .unions
+        .iter()
+        .filter(|sets| style(&sets.join("|"), "fill").is_some())
+        .collect();
+    if !filled.is_empty() {
+        svg.push_str("<defs>");
+        for (idx, circle) in venn.circles.iter().enumerate() {
+            svg.push_str(&format!(
+                "<clipPath id=\"venn-clip-{idx}\"><circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" /></clipPath>",
+                circle.x, circle.y, circle.radius
+            ));
+        }
+        svg.push_str("</defs>");
+    }
+
+    for circle in &venn.circles {
+        let base = base_of(circle);
+        let opacity = style(&circle.set, "fill-opacity").unwrap_or_else(|| "0.1".into());
+        let stroke = style(&circle.set, "stroke").unwrap_or_else(|| base.clone());
+        let width = style(&circle.set, "stroke-width").unwrap_or_else(|| format!("{STROKE_WIDTH}"));
+        svg.push_str(&format!(
+            "<circle class=\"venn-circle\" cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"{}\" fill-opacity=\"{}\" stroke=\"{}\" stroke-width=\"{}\" stroke-opacity=\"0.95\" />",
+            circle.x,
+            circle.y,
+            circle.radius,
+            escape_xml(&base),
+            escape_xml(&opacity),
+            escape_xml(&stroke),
+            escape_xml(&width)
+        ));
+    }
+
+    // A filled union: its last circle, clipped by each of the others.
+    for sets in filled {
+        let members: Vec<usize> = sets
+            .iter()
+            .filter_map(|id| venn.circles.iter().position(|c| &c.set == id))
+            .collect();
+        let Some((&last, rest)) = members.split_last() else {
+            continue;
+        };
+        let fill = style(&sets.join("|"), "fill").unwrap_or_default();
+        for idx in rest {
+            svg.push_str(&format!("<g clip-path=\"url(#venn-clip-{idx})\">"));
+        }
+        let c = &venn.circles[last];
+        svg.push_str(&format!(
+            "<circle class=\"venn-intersection\" cx=\"{:.3}\" cy=\"{:.3}\" r=\"{:.3}\" fill=\"{}\" />",
+            c.x,
+            c.y,
+            c.radius,
+            escape_xml(&fill)
+        ));
+        for _ in rest {
+            svg.push_str("</g>");
+        }
+    }
+
+    for label in &venn.labels {
+        let key = label.sets.join("|");
+        let color = style(&key, "color")
+            .or_else(|| {
+                let circle = venn
+                    .circles
+                    .iter()
+                    .find(|c| label.sets == [c.set.clone()])?;
+                shade(&base_of(circle))
+            })
+            .unwrap_or_else(|| theme.text_color.clone());
+        svg.push_str(&text(
+            "venn-label",
+            label.x,
+            label.y,
+            LABEL_FONT_SIZE,
+            &color,
+            &label.text,
+        ));
+    }
+
+    for item in &venn.texts {
+        let color = style(&item.id, "color").unwrap_or_else(|| theme.text_color.clone());
+        let line_h = TEXT_FONT_SIZE * 1.2;
+        let first = item.y - line_h * (item.lines.lines.len() as f32 - 1.0) / 2.0;
+        for (k, line) in item.lines.lines.iter().enumerate() {
+            svg.push_str(&text(
+                "venn-text-node",
+                item.x,
+                first + line_h * k as f32,
+                TEXT_FONT_SIZE,
+                &color,
+                line,
+            ));
+        }
+    }
     svg
 }
 
@@ -6565,6 +6771,22 @@ mod tests {
         );
         assert!(svg.contains(">date<") || svg.contains(">date created_at<"));
         assert!(svg.contains(">PK<"), "ER key markers must remain visible");
+    }
+
+    #[test]
+    fn venn_takes_the_theme_palette_and_reads_a_transparent_page_by_its_text() {
+        let input = "venn-beta\n  set A\n  set B\n  union A,B\n";
+        let config = LayoutConfig::default();
+        let parsed = crate::parser::parse_mermaid(input).expect("venn parses");
+        let mut theme = Theme::modern();
+        theme.venn_colors = vec!["#336699".into(), "#993366".into()];
+        theme.background = "none".into();
+        theme.text_color = "#eeeeee".into();
+        let layout = compute_layout(&parsed.graph, &theme, &config);
+        let svg = render_svg(&layout, &theme, &config);
+        assert!(svg.contains("fill=\"#336699\"") && svg.contains("fill=\"#993366\""));
+        // Set labels lightened, as on a dark page: #336699 is 40% light.
+        assert!(svg.contains("fill=\"hsl(210.0, 50.0%, 70.0%)\""), "{svg}");
     }
 
     /// Bounding box of one rendered radar axis label, in absolute SVG coords.

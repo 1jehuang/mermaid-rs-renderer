@@ -1083,6 +1083,14 @@ struct ThemeVariables {
     pie10: Option<String>,
     pie11: Option<String>,
     pie12: Option<String>,
+    venn1: Option<String>,
+    venn2: Option<String>,
+    venn3: Option<String>,
+    venn4: Option<String>,
+    venn5: Option<String>,
+    venn6: Option<String>,
+    venn7: Option<String>,
+    venn8: Option<String>,
     pie_title_text_size: Option<NumberOrString>,
     pie_title_text_color: Option<String>,
     pie_section_text_size: Option<NumberOrString>,
@@ -1768,6 +1776,16 @@ pub fn load_config_with_theme(
         }
         if let Some(v) = vars.pie12 {
             config.theme.pie_colors[11] = v;
+        }
+        let venn: Vec<String> = [
+            vars.venn1, vars.venn2, vars.venn3, vars.venn4, vars.venn5, vars.venn6, vars.venn7,
+            vars.venn8,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !venn.is_empty() {
+            config.theme.venn_colors = venn;
         }
         if let Some(v) = vars.pie_title_text_size
             && let Some(size) = v.as_f32()
@@ -4091,6 +4109,23 @@ mod tests {
 
         let config = load_config(Some(&path)).expect("should load config");
         assert!(!config.layout.fast_text_metrics);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn venn_theme_variables_set_the_venn_palette() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("mermaid_rs_venn_vars_{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r##"{"themeVariables": {"venn1": "#111111", "venn3": "#333333"}}"##,
+        )
+        .expect("should write temp config");
+
+        let config = load_config(Some(&path)).expect("should load config");
+        assert_eq!(config.theme.venn_colors, ["#111111", "#333333"]);
+        assert!(load_config(None).unwrap().theme.venn_colors.is_empty());
 
         let _ = std::fs::remove_file(&path);
     }

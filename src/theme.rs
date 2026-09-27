@@ -64,6 +64,10 @@ pub struct Theme {
     pub git_tag_label_background: String,
     pub git_tag_label_border: String,
     pub pie_colors: [String; 12],
+    /// mermaid.js's `venn1`…`venn8`. Empty, as in every built-in theme, derives
+    /// them from the primary, secondary and tertiary colours.
+    #[serde(default)]
+    pub venn_colors: Vec<String>,
     pub pie_title_text_size: f32,
     pub pie_title_text_color: String,
     pub pie_section_text_size: f32,
@@ -114,6 +118,7 @@ impl Theme {
             git_tag_label_background: MERMAID_GIT_TAG_LABEL_BG.to_string(),
             git_tag_label_border: MERMAID_GIT_TAG_LABEL_BORDER.to_string(),
             pie_colors,
+            venn_colors: Vec::new(),
             pie_title_text_size: 25.0,
             pie_title_text_color: MERMAID_TEXT_COLOR.to_string(),
             pie_section_text_size: 17.0,
@@ -164,6 +169,7 @@ impl Theme {
             git_tag_label_background: MERMAID_GIT_TAG_LABEL_BG.to_string(),
             git_tag_label_border: MERMAID_GIT_TAG_LABEL_BORDER.to_string(),
             pie_colors,
+            venn_colors: Vec::new(),
             pie_title_text_size: 25.0,
             pie_title_text_color: "#0F172A".to_string(),
             pie_section_text_size: 17.0,
@@ -246,6 +252,7 @@ impl Theme {
             git_tag_label_background: "#1f2020".to_string(),
             git_tag_label_border: "#cccccc".to_string(),
             pie_colors,
+            venn_colors: Vec::new(),
             pie_title_text_size: 25.0,
             pie_title_text_color: "lightgrey".to_string(),
             pie_section_text_size: 17.0,
@@ -322,6 +329,7 @@ impl Theme {
             git_tag_label_background: "#cde498".to_string(),
             git_tag_label_border: "#abb594".to_string(),
             pie_colors,
+            venn_colors: Vec::new(),
             pie_title_text_size: 25.0,
             pie_title_text_color: "black".to_string(),
             pie_section_text_size: 17.0,
@@ -400,6 +408,7 @@ impl Theme {
             git_tag_label_background: "#eeeeee".to_string(),
             git_tag_label_border: "#d4d4d4".to_string(),
             pie_colors,
+            venn_colors: Vec::new(),
             pie_title_text_size: 25.0,
             // taskTextDarkColor = text = #333
             pie_title_text_color: MERMAID_TEXT_COLOR.to_string(),

@@ -81,6 +81,7 @@ pub fn parse_mermaid(input: &str) -> Result<ParseOutput> {
         DiagramKind::Kanban => parse_kanban_diagram(input),
         DiagramKind::Architecture => parse_architecture_diagram(input),
         DiagramKind::Radar => parse_radar_diagram(input),
+        DiagramKind::Venn => parse_venn_diagram(input),
         DiagramKind::Treemap => parse_treemap_diagram(input),
         DiagramKind::XYChart => parse_xy_chart_diagram(input),
         DiagramKind::Flowchart => parse_flowchart(input),
@@ -190,6 +191,9 @@ fn detect_diagram_kind(input: &str) -> Option<DiagramKind> {
         }
         if starts_with_diagram_header(&lower, "radar") {
             return Some(DiagramKind::Radar);
+        }
+        if starts_with_diagram_header(&lower, "venn") {
+            return Some(DiagramKind::Venn);
         }
         if starts_with_diagram_header(&lower, "treemap") {
             return Some(DiagramKind::Treemap);
@@ -4380,6 +4384,217 @@ fn parse_radar_diagram(input: &str) -> Result<ParseOutput> {
     Ok(ParseOutput { graph, init_config })
 }
 
+/// Parses a `venn-beta` diagram, statement for statement as mermaid.js's
+/// `venn.jison` reads it:
+///
+/// - `title <text>`
+/// - `set <id>["label"][:size]` — a set; `:size` defaults to 10
+/// - `union <id>,<id>[,…]["label"][:size]` — an overlap of earlier sets;
+///   `:size` defaults to `10 / n²` for `n` sets
+/// - `text <id>["label"]`, indented under a `set` or `union`, places a text
+///   item in that region; unindented, `text <ids> <id>["label"]` names the
+///   region itself
+/// - `style <ids> prop:value, prop:value` — `fill`, `color`, `stroke`,
+///   `stroke-width`, `fill-opacity`
+///
+/// Identifiers are bare words or `"quoted strings"`. As in mermaid.js, a union
+/// of fewer than two sets, a union naming a set not declared before it, and an
+/// indented `text` with no set above it are errors.
+fn parse_venn_diagram(input: &str) -> Result<ParseOutput> {
+    use crate::ir::{VennStyle, VennSubset, VennText};
+    let mut graph = Graph::new();
+    graph.kind = DiagramKind::Venn;
+    let (lines, init_config) = preprocess_input_keep_indent(input)?;
+    let mut known: Vec<String> = Vec::new();
+    let mut current: Option<Vec<String>> = None;
+
+    for raw_line in lines {
+        let indented = raw_line.starts_with([' ', '\t']);
+        let line = raw_line.trim();
+        let lower = line.to_ascii_lowercase();
+        if starts_with_diagram_header(&lower, "venn") {
+            continue;
+        }
+        if let Some(rest) = venn_keyword(line, "title") {
+            let title = strip_quotes(rest);
+            if !title.is_empty() {
+                graph.venn.title = Some(title);
+            }
+            continue;
+        }
+        if let Some(rest) = venn_keyword(line, "set") {
+            let mut cursor = VennCursor::new(rest);
+            let id = cursor
+                .identifier()
+                .ok_or_else(|| anyhow::anyhow!("set requires an identifier: {line}"))?;
+            let label = cursor.bracket_label();
+            let size = cursor.size();
+            if !known.contains(&id) {
+                known.push(id.clone());
+            }
+            current = Some(vec![id.clone()]);
+            graph.venn.subsets.push(VennSubset {
+                sets: vec![id],
+                label,
+                size: size.unwrap_or(10.0),
+            });
+            continue;
+        }
+        if let Some(rest) = venn_keyword(line, "union") {
+            let mut cursor = VennCursor::new(rest);
+            let mut sets = cursor.identifier_list();
+            if sets.len() < 2 {
+                bail!("union requires multiple identifiers: {line}");
+            }
+            let unknown: Vec<&str> = sets
+                .iter()
+                .filter(|id| !known.contains(id))
+                .map(String::as_str)
+                .collect();
+            if !unknown.is_empty() {
+                bail!("unknown set identifier: {}", unknown.join(", "));
+            }
+            let label = cursor.bracket_label();
+            let size = cursor.size();
+            let n = sets.len() as f32;
+            sets.sort();
+            current = Some(sets.clone());
+            graph.venn.subsets.push(VennSubset {
+                sets,
+                label,
+                size: size.unwrap_or(10.0 / (n * n)),
+            });
+            continue;
+        }
+        if let Some(rest) = venn_keyword(line, "text") {
+            let mut cursor = VennCursor::new(rest);
+            let mut sets = match (indented, &current) {
+                (true, Some(sets)) => sets.clone(),
+                (true, None) => bail!("text requires set: {line}"),
+                (false, _) => cursor.identifier_list(),
+            };
+            let Some(id) = cursor.text_id() else {
+                bail!("text requires an identifier: {line}")
+            };
+            let label = cursor.bracket_label();
+            sets.sort();
+            graph.venn.texts.push(VennText { sets, id, label });
+            continue;
+        }
+        if let Some(rest) = venn_keyword(line, "style") {
+            let mut cursor = VennCursor::new(rest);
+            let mut targets = cursor.identifier_list();
+            targets.sort();
+            let styles = cursor
+                .rest
+                .split(',')
+                .filter_map(|field| {
+                    let (key, value) = field.split_once(':')?;
+                    let (key, value) = (key.trim(), strip_quotes(value.trim()));
+                    (!key.is_empty() && !value.is_empty()).then(|| (key.to_string(), value))
+                })
+                .collect();
+            graph.venn.styles.push(VennStyle { targets, styles });
+            continue;
+        }
+    }
+
+    Ok(ParseOutput { graph, init_config })
+}
+
+/// `line` with its leading `keyword` (case-insensitive, whole word) removed.
+fn venn_keyword<'a>(line: &'a str, keyword: &str) -> Option<&'a str> {
+    let head = line.get(..keyword.len())?;
+    if !head.eq_ignore_ascii_case(keyword) {
+        return None;
+    }
+    let rest = &line[keyword.len()..];
+    (rest.is_empty() || rest.starts_with([' ', '\t', '"'])).then(|| rest.trim_start())
+}
+
+/// Reads the pieces of one Venn statement left to right.
+struct VennCursor<'a> {
+    rest: &'a str,
+}
+
+impl<'a> VennCursor<'a> {
+    fn new(rest: &'a str) -> Self {
+        Self {
+            rest: rest.trim_start(),
+        }
+    }
+
+    /// A bare `[A-Za-z_][A-Za-z0-9_-]*` or a `"quoted string"`.
+    fn identifier(&mut self) -> Option<String> {
+        self.rest = self.rest.trim_start();
+        if let Some(body) = self.rest.strip_prefix('"') {
+            let end = body.find('"')?;
+            let id = body[..end].to_string();
+            self.rest = &body[end + 1..];
+            return Some(id);
+        }
+        let first = self.rest.chars().next()?;
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return None;
+        }
+        let end = self
+            .rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            .unwrap_or(self.rest.len());
+        let id = self.rest[..end].to_string();
+        self.rest = &self.rest[end..];
+        Some(id)
+    }
+
+    /// `A, B, "C D"`.
+    fn identifier_list(&mut self) -> Vec<String> {
+        let mut ids = Vec::new();
+        while let Some(id) = self.identifier() {
+            ids.push(id);
+            let after = self.rest.trim_start();
+            match after.strip_prefix(',') {
+                Some(next) => self.rest = next,
+                None => break,
+            }
+        }
+        ids
+    }
+
+    /// A text item's id: an identifier, a quoted string, or a number.
+    fn text_id(&mut self) -> Option<String> {
+        if let Some(id) = self.identifier() {
+            return Some(id);
+        }
+        self.rest = self.rest.trim_start();
+        let end = self
+            .rest
+            .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '+' | '-')))
+            .unwrap_or(self.rest.len());
+        (end > 0).then(|| {
+            let id = self.rest[..end].to_string();
+            self.rest = &self.rest[end..];
+            id
+        })
+    }
+
+    /// `["label"]` or `[label]`.
+    fn bracket_label(&mut self) -> Option<String> {
+        let body = self.rest.trim_start().strip_prefix('[')?;
+        let end = body.find(']')?;
+        let label = strip_quotes(&body[..end]);
+        self.rest = &body[end + 1..];
+        (!label.is_empty()).then_some(label)
+    }
+
+    /// `:N`.
+    fn size(&mut self) -> Option<f32> {
+        let body = self.rest.trim_start().strip_prefix(':')?;
+        let value = body.split_whitespace().next()?.parse::<f32>().ok()?;
+        self.rest = "";
+        (value.is_finite() && value > 0.0).then_some(value)
+    }
+}
+
 /// Parses one `curve Name {entries}` line into a structural curve.
 ///
 /// Entries stay positional (index-aligned with the declared axes) with
@@ -7706,5 +7921,77 @@ A["foo & bar"] & B --> C"#;
             masked.len(),
             "masked string should have same byte length as original"
         );
+    }
+
+    #[test]
+    fn venn_parses_sets_unions_labels_sizes_and_defaults() {
+        let input = "venn-beta\n  title \"Team overlap\"\n  set A[\"Alpha\"]:20\n  set B\n  set \"C D\"\n  union A,B[\"AB\"]:3\n  union A, B, \"C D\"\n";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.kind, DiagramKind::Venn);
+        let venn = &parsed.graph.venn;
+        assert_eq!(venn.title.as_deref(), Some("Team overlap"));
+        let s: Vec<(Vec<String>, Option<String>, f32)> = venn
+            .subsets
+            .iter()
+            .map(|x| (x.sets.clone(), x.label.clone(), x.size))
+            .collect();
+        let v = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        assert_eq!(s[0], (v(&["A"]), Some("Alpha".into()), 20.0));
+        assert_eq!(s[1], (v(&["B"]), None, 10.0));
+        assert_eq!(s[2], (v(&["C D"]), None, 10.0));
+        assert_eq!(s[3], (v(&["A", "B"]), Some("AB".into()), 3.0));
+        // A union of three: its sets sorted, size 10 / 3².
+        assert_eq!(s[4].0, v(&["A", "B", "C D"]));
+        assert!((s[4].2 - 10.0 / 9.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn venn_text_attaches_to_the_region_above_or_the_one_named() {
+        let input = "venn-beta\n  set A[\"Frontend\"]\n    text A1[\"React\"]\n  set B\n  union A,B\n    text AB1[\"OpenAPI\"]\ntext B B1[\"API\"]\n";
+        let venn = parse_mermaid(input).unwrap().graph.venn;
+        let t: Vec<(Vec<String>, String, Option<String>)> = venn
+            .texts
+            .iter()
+            .map(|x| (x.sets.clone(), x.id.clone(), x.label.clone()))
+            .collect();
+        assert_eq!(t[0], (vec!["A".into()], "A1".into(), Some("React".into())));
+        assert_eq!(
+            t[1],
+            (
+                vec!["A".into(), "B".into()],
+                "AB1".into(),
+                Some("OpenAPI".into())
+            )
+        );
+        assert_eq!(t[2], (vec!["B".into()], "B1".into(), Some("API".into())));
+    }
+
+    #[test]
+    fn venn_styles_keep_their_properties_in_order() {
+        let input = "venn-beta\n  set A\n  set B\n  style A fill:#ff6b6b, fill-opacity:0.4\n  style B,A color:#333\n";
+        let venn = parse_mermaid(input).unwrap().graph.venn;
+        assert_eq!(venn.styles[0].targets, vec!["A".to_string()]);
+        assert_eq!(
+            venn.styles[0].styles,
+            vec![
+                ("fill".to_string(), "#ff6b6b".to_string()),
+                ("fill-opacity".to_string(), "0.4".to_string())
+            ]
+        );
+        assert_eq!(
+            venn.styles[1].targets,
+            vec!["A".to_string(), "B".to_string()]
+        );
+    }
+
+    #[test]
+    fn venn_rejects_what_mermaid_rejects() {
+        for bad in [
+            "venn-beta\n  set A\n  union A\n",
+            "venn-beta\n  set A\n  union A,Z\n",
+            "venn-beta\n    text T[\"orphan\"]\n",
+        ] {
+            assert!(parse_mermaid(bad).is_err(), "should not parse: {bad:?}");
+        }
     }
 }

@@ -33,6 +33,7 @@ pub enum DiagramKind {
     Radar,
     Treemap,
     XYChart,
+    Venn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,6 +450,7 @@ pub struct Graph {
     pub gantt_display_mode: Option<String>,
     pub journey_title: Option<String>,
     pub radar: RadarData,
+    pub venn: VennData,
     pub gitgraph: GitGraphData,
     pub class_defs: HashMap<String, NodeStyle>,
     pub node_classes: HashMap<String, Vec<String>>,
@@ -587,6 +589,43 @@ pub struct RadarData {
     pub graticule: RadarGraticule,
 }
 
+/// One `set` or `union` of a Venn diagram: the sets it covers (sorted), its
+/// display label, and its size. Mermaid's defaults: 10 for a set, `10 / n²`
+/// for a union of `n` sets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VennSubset {
+    pub sets: Vec<String>,
+    pub label: Option<String>,
+    pub size: f32,
+}
+
+/// A `text` item placed inside a Venn region.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VennText {
+    /// The region it belongs to (sorted set identifiers).
+    pub sets: Vec<String>,
+    pub id: String,
+    pub label: Option<String>,
+}
+
+/// A `style` statement: its targets (sorted) and `property: value` pairs in
+/// order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VennStyle {
+    pub targets: Vec<String>,
+    pub styles: Vec<(String, String)>,
+}
+
+/// Structural Venn diagram data (`venn-beta`), carried from the parser to
+/// layout and render.
+#[derive(Debug, Clone, Default)]
+pub struct VennData {
+    pub title: Option<String>,
+    pub subsets: Vec<VennSubset>,
+    pub texts: Vec<VennText>,
+    pub styles: Vec<VennStyle>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TimelineEvent {
     pub time: String,
@@ -641,6 +680,7 @@ impl Graph {
             gantt_display_mode: None,
             journey_title: None,
             radar: RadarData::default(),
+            venn: VennData::default(),
             gitgraph: GitGraphData::default(),
             class_defs: HashMap::new(),
             node_classes: HashMap::new(),
