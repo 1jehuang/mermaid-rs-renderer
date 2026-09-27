@@ -294,6 +294,7 @@ fn resolve_center_labels(
         vec![None; edges.len()]
     };
     let mut fixed_center_indices: HashSet<usize> = HashSet::new();
+    let mut released_indices: HashSet<usize> = HashSet::new();
     for (idx, edge) in edges.iter_mut().enumerate() {
         let (Some(label), Some(anchor)) = (&edge.label, edge.label_anchor) else {
             continue;
@@ -329,6 +330,18 @@ fn resolve_center_labels(
             // bidirectional graphs can produce overlapping reserved centers, and
             // the flowchart-specific de-overlap pass below needs freedom to move
             // them to nearby clear positions.
+            continue;
+        }
+        // A label the clamp pushed onto a node is not fixed there: an edge
+        // routed along the canvas edge would otherwise keep its label on the
+        // node beside it. The search below moves it, unclamped, and the graph
+        // bounds finalization grows the canvas to fit it.
+        if clamped != anchor
+            && occupied[..node_obstacle_count]
+                .iter()
+                .any(|node| overlap_area(&rect, node) > 0.0)
+        {
+            released_indices.insert(idx);
             continue;
         }
         occupied_grid.insert(occupied.len(), &occupied_rect);
@@ -375,6 +388,11 @@ fn resolve_center_labels(
     });
 
     for idx in order {
+        let bounds = if released_indices.contains(&idx) {
+            None
+        } else {
+            bounds
+        };
         let label = match edges[idx].label.clone() {
             Some(l) => l,
             None => continue,
@@ -1788,6 +1806,11 @@ fn enforce_center_label_attachment_caps(
     let nudge_weight = if kind == DiagramKind::Er { 0.04 } else { 0.06 };
 
     for _ in 0..2 {
+        let paths: Vec<Vec<(f32, f32)>> = edges.iter().map(|edge| edge.points.clone()).collect();
+        let mut edges_text: Vec<Option<Rect>> = edges
+            .iter()
+            .map(|edge| Some(label_core_rect(edge.label_anchor?, edge.label.as_ref()?)))
+            .collect();
         let current_label_rects: Vec<Option<Rect>> = edges
             .iter()
             .map(|edge| {
@@ -1870,13 +1893,72 @@ fn enforce_center_label_attachment_caps(
                 }
             }
             push_center_unique(&mut candidates, center);
+            // Then along the rest of the edge — tried only when none of the
+            // above moves the label, so that a spot on a node or across an
+            // edge (skipped below) is not the only way to stay attached.
+            let base_len = candidates.len();
+            for (ax, ay, dx, dy) in LABEL_ANCHOR_FRACTIONS
+                .iter()
+                .filter_map(|frac| edge_label_anchor_at_fraction(edge, *frac))
+                .chain(edge_segment_anchors(edge, LABEL_EXTRA_SEGMENT_ANCHORS))
+            {
+                for offset in offsets {
+                    for side in [1.0, -1.0] {
+                        let mut cand = (ax - dy * offset * side, ay + dx * offset * side);
+                        if let Some(bound) = bounds {
+                            cand = clamp_label_center_to_bounds(
+                                cand,
+                                label.width,
+                                label.height,
+                                label_pad_x,
+                                label_pad_y,
+                                bound,
+                            );
+                        }
+                        push_center_unique(&mut candidates, cand);
+                    }
+                }
+            }
             if candidates.is_empty() {
                 continue;
             }
 
+            // What the text itself — not its padded box — covers: node area, and
+            // other edges crossing it. A move may not make either worse; the
+            // score below weighs both far under the distance to its own edge.
+            let on_nodes = |center: (f32, f32)| -> f32 {
+                let text = label_core_rect(center, label);
+                nodes
+                    .values()
+                    .map(|n| overlap_area(&text, &(n.x, n.y, n.width, n.height)))
+                    .sum()
+            };
+            let crossings = |center: (f32, f32)| {
+                let text = label_core_rect(center, label);
+                paths
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, points)| *other != idx && path_intersects_rect(points, &text))
+                    .count()
+            };
+            let on_labels = |center: (f32, f32)| {
+                let text = label_core_rect(center, label);
+                edges_text
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, r)| {
+                        *other != idx && r.is_some_and(|r| overlap_area(&text, &r) > 0.0)
+                    })
+                    .count()
+            };
+            let (current_on_nodes, current_crossings, current_on_labels) =
+                (on_nodes(center), crossings(center), on_labels(center));
             let mut best = center;
             let mut best_score = f32::INFINITY;
-            for cand in candidates {
+            for (k, cand) in candidates.into_iter().enumerate() {
+                if k == base_len && best != center {
+                    break;
+                }
                 let rect = (
                     cand.0 - label.width * 0.5 - label_pad_x,
                     cand.1 - label.height * 0.5 - label_pad_y,
@@ -1891,6 +1973,13 @@ fn enforce_center_label_attachment_caps(
                 let mut overlap = 0.0f32;
                 for obstacle in &static_obstacles {
                     overlap += overlap_area(&rect, obstacle);
+                }
+                if on_nodes(cand) > current_on_nodes + 0.5
+                    || (k >= base_len
+                        && (crossings(cand) > current_crossings
+                            || on_labels(cand) > current_on_labels))
+                {
+                    continue;
                 }
                 for (other_idx, other_rect_opt) in current_label_rects.iter().enumerate() {
                     if other_idx == idx {
@@ -1918,6 +2007,8 @@ fn enforce_center_label_attachment_caps(
                     best = cand;
                 }
             }
+            // Where it now is, for the labels after it in this round.
+            edges_text[idx] = Some(label_core_rect(best, label));
             edge.label_anchor = Some(best);
         }
     }
