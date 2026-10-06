@@ -62,7 +62,7 @@ use crate::theme::{Theme, adjust_color, parse_color_to_hsl};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::Instant;
+use web_time::Instant;
 
 // Label placement padding (resolved per diagram kind).
 // Minimum padding around the entire layout bounding box.
