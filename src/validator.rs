@@ -495,7 +495,8 @@ fn split_sequence_arrow(trimmed: &str) -> Option<(&str, &str)> {
     const PATTERNS: &[&str] = &["-->>", "--x", "--)", "-->", "->>", "->", "-x", "-)"];
     for pat in PATTERNS {
         if let Some((lhs, rhs)) = before_colon.split_once(pat) {
-            return Some((lhs, rhs));
+            // `->>+B` / `->>-B` are activation shorthands, not part of the name.
+            return Some((lhs, rhs.trim_start().trim_start_matches(['+', '-'])));
         }
     }
     None
@@ -739,6 +740,12 @@ flowchart LR"#;
     fn sequence_participant_as_alias_is_honored() {
         // Either the raw name OR the alias satisfies the reference.
         let input = "sequenceDiagram\nparticipant A as Alice\nA->>A: hi\n";
+        assert!(validate(input).is_ok());
+    }
+
+    #[test]
+    fn sequence_activation_shorthand_is_not_part_of_name() {
+        let input = "sequenceDiagram\nparticipant A\nparticipant B\nA->>+B: go\nB-->>-A: done\n";
         assert!(validate(input).is_ok());
     }
 

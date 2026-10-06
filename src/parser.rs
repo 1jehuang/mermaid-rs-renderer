@@ -1205,40 +1205,42 @@ fn parse_sequence_message(
     crate::ir::EdgeStyle,
     Option<crate::ir::SequenceActivationKind>,
 )> {
-    let tokens = [
-        "-->>+", "->>+", "-->+", "->+", "-->>-", "->>-", "-->-", "->-", "<--+", "<-+", "<--", "<-",
-        "-->>", "->>", "-->", "->",
+    const TOKENS: &[&str] = &[
+        "-->>+", "-->>-", "-->>", "->>+", "->>-", "->>", "--)+", "--)-", "--)", "-)+", "-)-", "-)",
+        "--x+", "--x-", "--x", "-x+", "-x-", "-x", "-->+", "-->-", "-->", "->+", "->-", "->",
+        "<--+", "<-+", "<--", "<-",
     ];
-    for token in tokens {
-        if let Some(pos) = line.find(token) {
-            let left = line[..pos].trim();
-            let right_part = line[pos + token.len()..].trim();
-            if left.is_empty() || right_part.is_empty() {
-                continue;
-            }
-            let (right, label) = split_label(right_part);
-            let mut from = left.to_string();
-            let mut to = right.to_string();
-            if token.starts_with('<') {
-                std::mem::swap(&mut from, &mut to);
-            }
-            let trimmed = token.trim_start_matches('<').trim_end_matches(['+', '-']);
-            let style = if trimmed.starts_with("--") {
-                crate::ir::EdgeStyle::Dotted
-            } else {
-                crate::ir::EdgeStyle::Solid
-            };
-            let activation = if token.ends_with('+') {
-                Some(crate::ir::SequenceActivationKind::Activate)
-            } else if token.ends_with('-') {
-                Some(crate::ir::SequenceActivationKind::Deactivate)
-            } else {
-                None
-            };
-            return Some((from, to, label, style, activation));
-        }
+    // Leftmost match wins, longest token on ties (TOKENS is ordered so the
+    // first hit at a position is the longest), so arrows inside the label
+    // text can't be picked over the real message arrow.
+    let (pos, token) = TOKENS
+        .iter()
+        .filter_map(|t| line.find(t).map(|p| (p, *t)))
+        .filter(|(p, t)| !line[..*p].trim().is_empty() && !line[p + t.len()..].trim().is_empty())
+        .min_by_key(|(p, _)| *p)?;
+    let left = line[..pos].trim();
+    let (right, label) = split_label(line[pos + token.len()..].trim());
+    let mut from = left.to_string();
+    let mut to = right.to_string();
+    if token.starts_with('<') {
+        std::mem::swap(&mut from, &mut to);
     }
-    None
+    let (base, activation) = if let Some(base) = token.strip_suffix('+') {
+        (base, Some(crate::ir::SequenceActivationKind::Activate))
+    } else if !token.starts_with('<') && token.ends_with('-') {
+        (
+            &token[..token.len() - 1],
+            Some(crate::ir::SequenceActivationKind::Deactivate),
+        )
+    } else {
+        (token, None)
+    };
+    let style = if base.trim_start_matches('<').starts_with("--") {
+        crate::ir::EdgeStyle::Dotted
+    } else {
+        crate::ir::EdgeStyle::Solid
+    };
+    Some((from, to, label, style, activation))
 }
 
 fn parse_sequence_note(
@@ -7541,6 +7543,47 @@ A["foo & bar"] & B --> C"#;
         assert_eq!(node.label, "Alice");
         assert_eq!(parsed.graph.edges.len(), 2);
         assert_eq!(parsed.graph.edges[1].style, crate::ir::EdgeStyle::Dotted);
+    }
+
+    #[test]
+    fn parse_sequence_arrow_inside_label_is_text() {
+        // `-->>` in the label must not be taken for the message arrow.
+        let input = "sequenceDiagram\nA->>B: forwards -->> to C";
+        let parsed = parse_mermaid(input).unwrap();
+        let e = &parsed.graph.edges[0];
+        assert_eq!((e.from.as_str(), e.to.as_str()), ("A", "B"));
+        assert_eq!(e.label.as_deref(), Some("forwards -->> to C"));
+        assert_eq!(e.style, crate::ir::EdgeStyle::Solid);
+    }
+
+    #[test]
+    fn parse_sequence_async_arrows_and_activation_shorthand() {
+        let input = "sequenceDiagram\nparticipant A\nparticipant B\nA->>+B: go -> now\nB--)A: async\nA-xB: lost\nB-->>-A: done";
+        let parsed = parse_mermaid(input).unwrap();
+        let edges: Vec<_> = parsed
+            .graph
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.label.as_deref(), e.style))
+            .collect();
+        use crate::ir::EdgeStyle::{Dotted, Solid};
+        assert_eq!(
+            edges,
+            [
+                ("A", "B", Some("go -> now"), Solid),
+                ("B", "A", Some("async"), Dotted),
+                ("A", "B", Some("lost"), Solid),
+                ("B", "A", Some("done"), Dotted),
+            ]
+        );
+        let acts: Vec<_> = parsed
+            .graph
+            .sequence_activations
+            .iter()
+            .map(|a| (a.participant.as_str(), a.kind))
+            .collect();
+        use crate::ir::SequenceActivationKind::{Activate, Deactivate};
+        assert_eq!(acts, [("B", Activate), ("A", Deactivate)]);
     }
 
     #[test]
