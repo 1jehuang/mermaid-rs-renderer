@@ -50,3 +50,17 @@
 ## Diagrams
 - `docs/diagrams/architecture.mmd`
 - `docs/diagrams/pipeline.mmd`
+
+## Sequence frame note ownership
+
+`SequenceFrame::start_idx..end_idx` identifies the frame's messages, while
+`SequenceFrame::note_range` is a half-open range into `Graph::sequence_notes`.
+The parser records note counts when opening and closing a frame. This distinguishes
+notes inside a frame from notes immediately before or after it, even when they
+share the same message index. Nested frames can have overlapping note ranges.
+
+Code constructing a `SequenceFrame` literal must provide `note_range`; use an empty
+range such as `0..0` when it owns no notes. The new public field is a source-level
+API change for downstream struct literals and must be considered when releasing.
+Layout uses the range for frame bounds and space before a following note. Empty
+message frames and complex nested-frame layout remain separate limitations.

@@ -2,6 +2,76 @@ use super::*;
 
 type Rect = (f32, f32, f32, f32);
 
+/// Min/max summaries compose without rescanning the contents of nested frames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FrameBounds {
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+}
+
+impl FrameBounds {
+    const EMPTY: Self = Self {
+        min_x: f32::INFINITY,
+        max_x: f32::NEG_INFINITY,
+        min_y: f32::INFINITY,
+        max_y: f32::NEG_INFINITY,
+    };
+
+    /// Return the union of two bounds; EMPTY is the identity for this operation.
+    fn merge(self, other: Self) -> Self {
+        Self {
+            min_x: self.min_x.min(other.min_x),
+            max_x: self.max_x.max(other.max_x),
+            min_y: self.min_y.min(other.min_y),
+            max_y: self.max_y.max(other.max_y),
+        }
+    }
+}
+
+/// O(n) storage/build and O(log n) queries, including arbitrary public-IR ranges.
+struct FrameBoundsIndex {
+    tree: Vec<FrameBounds>,
+    len: usize,
+}
+
+impl FrameBoundsIndex {
+    /// Build a linear-space range index over bounds in message or note order.
+    fn new(bounds: impl ExactSizeIterator<Item = FrameBounds>) -> Self {
+        let len = bounds.len();
+        let mut tree = vec![FrameBounds::EMPTY; len * 2];
+        for (index, bounds) in bounds.enumerate() {
+            tree[len + index] = bounds;
+        }
+        for index in (1..len).rev() {
+            tree[index] = tree[index * 2].merge(tree[index * 2 + 1]);
+        }
+        Self { tree, len }
+    }
+
+    /// Return bounds for a half-open range, clamping endpoints to the indexed length.
+    /// Empty or reversed ranges return EMPTY, including queries on an empty index.
+    fn query(&self, range: std::ops::Range<usize>) -> FrameBounds {
+        let mut result = FrameBounds::EMPTY;
+        let mut start = range.start.min(self.len) + self.len;
+        let mut end = range.end.min(self.len) + self.len;
+        while start < end {
+            if start % 2 == 1 {
+                result = result.merge(self.tree[start]);
+                start += 1;
+            }
+            if end % 2 == 1 {
+                end -= 1;
+                result = result.merge(self.tree[end]);
+            }
+            start /= 2;
+            end /= 2;
+        }
+        result
+    }
+}
+
 const SEQUENCE_LABEL_PAD_X: f32 = 3.0;
 const SEQUENCE_LABEL_PAD_Y: f32 = 2.0;
 const SEQUENCE_ENDPOINT_LABEL_PAD_X: f32 = 2.5;
@@ -155,6 +225,8 @@ fn compute_sequence_lane_centers(
     centers
 }
 
+/// Lay out participants, messages, notes, and frames, using message and note
+/// ranges to include only the content owned by each frame.
 pub(super) fn compute_sequence_layout(
     graph: &Graph,
     theme: &Theme,
@@ -247,7 +319,8 @@ pub(super) fn compute_sequence_layout(
         .collect();
 
     let mut extra_before = vec![0.0; graph.edges.len()];
-    let frame_end_pad = base_spacing * 0.25;
+    let frame_end_pad = (theme.font_size * 0.85).max(12.0);
+    let mut frame_end_padding: BTreeMap<(usize, usize), f32> = BTreeMap::new();
     for frame in &graph.sequence_frames {
         if frame.start_idx < extra_before.len() {
             extra_before[frame.start_idx] += base_spacing;
@@ -257,9 +330,9 @@ pub(super) fn compute_sequence_layout(
                 extra_before[section.start_idx] += base_spacing;
             }
         }
-        if frame.end_idx < extra_before.len() {
-            extra_before[frame.end_idx] += frame_end_pad;
-        }
+        *frame_end_padding
+            .entry((frame.end_idx, frame.note_range.end))
+            .or_default() += frame_end_pad;
     }
 
     let mut notes_by_index = vec![Vec::new(); graph.edges.len().saturating_add(1)];
@@ -274,6 +347,9 @@ pub(super) fn compute_sequence_layout(
     for idx in 0..=graph.edges.len() {
         if let Some(bucket) = notes_by_index.get(idx) {
             for note in bucket {
+                message_cursor += frame_end_padding
+                    .remove(&(idx, sequence_notes.len()))
+                    .unwrap_or(0.0);
                 message_cursor += geometry.note_gap_y;
                 let label = measure_sequence_text(&note.label, theme, config);
                 let mut width =
@@ -318,9 +394,15 @@ pub(super) fn compute_sequence_layout(
                 message_cursor += height;
             }
         }
+        message_cursor += frame_end_padding
+            .remove(&(idx, sequence_notes.len()))
+            .unwrap_or(0.0);
         if idx < graph.edges.len() {
             message_cursor += extra_before[idx] + message_row_spacing[idx];
             message_ys.push(message_cursor);
+            if graph.edges[idx].from == graph.edges[idx].to {
+                message_cursor += geometry.note_gap_x * 1.4;
+            }
         }
     }
 
@@ -380,7 +462,36 @@ pub(super) fn compute_sequence_layout(
 
     let mut sequence_frames = Vec::new();
     if !graph.sequence_frames.is_empty() && !message_ys.is_empty() {
-        let mut frames = graph.sequence_frames.clone();
+        let message_bounds = FrameBoundsIndex::new(edges.iter().map(|edge| {
+            let mut bounds = FrameBounds::EMPTY;
+            for id in [&edge.from, &edge.to] {
+                if let Some(node) = nodes.get(id) {
+                    let center = sequence_lane_center(node);
+                    bounds.min_x = bounds.min_x.min(center);
+                    bounds.max_x = bounds.max_x.max(center);
+                }
+            }
+            for &(x, y) in &edge.points {
+                bounds.min_x = bounds.min_x.min(x);
+                bounds.max_x = bounds.max_x.max(x);
+                bounds.max_y = bounds.max_y.max(y);
+            }
+            if let (Some(label), Some(first), Some(last)) =
+                (&edge.label, edge.points.first(), edge.points.last())
+            {
+                let center = (first.0 + last.0) * 0.5;
+                bounds.min_x = bounds.min_x.min(center - label.width * 0.5);
+                bounds.max_x = bounds.max_x.max(center + label.width * 0.5);
+            }
+            bounds
+        }));
+        let note_bounds = FrameBoundsIndex::new(sequence_notes.iter().map(|note| FrameBounds {
+            min_x: note.x,
+            max_x: note.x + note.width,
+            min_y: note.y,
+            max_y: note.y + note.height,
+        }));
+        let mut frames: Vec<_> = graph.sequence_frames.iter().collect();
         frames.sort_by(|a, b| {
             a.start_idx
                 .cmp(&b.start_idx)
@@ -391,39 +502,17 @@ pub(super) fn compute_sequence_layout(
                 continue;
             }
 
-            let mut min_center_x = f32::INFINITY;
-            let mut max_center_x = f32::NEG_INFINITY;
-            for edge in graph
-                .edges
-                .iter()
-                .skip(frame.start_idx)
-                .take(frame.end_idx.saturating_sub(frame.start_idx))
-            {
-                if let Some(node) = nodes.get(&edge.from) {
-                    let center = sequence_lane_center(node);
-                    min_center_x = min_center_x.min(center);
-                    max_center_x = max_center_x.max(center);
-                }
-                if let Some(node) = nodes.get(&edge.to) {
-                    let center = sequence_lane_center(node);
-                    min_center_x = min_center_x.min(center);
-                    max_center_x = max_center_x.max(center);
-                }
-            }
-            if !min_center_x.is_finite() || !max_center_x.is_finite() {
-                for node in nodes.values() {
-                    let center = sequence_lane_center(node);
-                    min_center_x = min_center_x.min(center);
-                    max_center_x = max_center_x.max(center);
-                }
-            }
+            let messages = message_bounds.query(frame.start_idx..frame.end_idx);
+            let notes = note_bounds.query(frame.note_range.clone());
+            let min_center_x = messages.min_x.min(notes.min_x);
+            let max_center_x = messages.max_x.max(notes.max_x);
             if !min_center_x.is_finite() || !max_center_x.is_finite() {
                 continue;
             }
-
             let frame_pad_x = (theme.font_size * 0.7).max(11.0);
             let frame_x = min_center_x - frame_pad_x;
-            let frame_width = (max_center_x - min_center_x) + frame_pad_x + theme.font_size * 1.05;
+            let mut frame_width =
+                (max_center_x - min_center_x) + frame_pad_x + theme.font_size * 1.05;
 
             let first_y = message_ys
                 .get(frame.start_idx)
@@ -433,14 +522,8 @@ pub(super) fn compute_sequence_layout(
                 .get(frame.end_idx.saturating_sub(1))
                 .copied()
                 .unwrap_or(first_y);
-            let mut min_y = first_y;
-            let mut max_y = last_y;
-            for note in &sequence_notes {
-                if note.index >= frame.start_idx && note.index <= frame.end_idx {
-                    min_y = min_y.min(note.y);
-                    max_y = max_y.max(note.y + note.height);
-                }
-            }
+            let min_y = first_y.min(notes.min_y);
+            let max_y = last_y.max(messages.max_y).max(notes.max_y);
             let top_offset = (base_spacing * 1.8).max(theme.font_size * 3.9);
             let bottom_offset = (theme.font_size * 0.85).max(12.0);
             let frame_y = min_y - top_offset;
@@ -459,6 +542,19 @@ pub(super) fn compute_sequence_layout(
             let label_box_w =
                 (label_block.width + theme.font_size * 1.2).max(theme.font_size * 3.1);
             let label_box_h = (theme.font_size * 1.25).max(20.0);
+            let section_blocks: Vec<_> = frame
+                .sections
+                .iter()
+                .map(|section| {
+                    section
+                        .label
+                        .as_ref()
+                        .map(|label| measure_sequence_text(&format!("[{label}]"), theme, config))
+                })
+                .collect();
+            for block in section_blocks.iter().flatten() {
+                frame_width = frame_width.max(label_box_w + block.width + theme.font_size * 1.5);
+            }
             let label_box_x = frame_x;
             let label_box_y = frame_y;
             let label = SequenceLabel {
@@ -480,18 +576,17 @@ pub(super) fn compute_sequence_layout(
 
             let mut section_labels = Vec::new();
             let label_offset = theme.font_size * 0.7;
-            for (section_idx, section) in frame.sections.iter().enumerate() {
-                if let Some(label) = &section.label {
-                    let display = format!("[{}]", label);
-                    let block = measure_sequence_text(&display, theme, config);
+            for (section_idx, block) in section_blocks.into_iter().enumerate() {
+                if let Some(block) = block {
                     let label_y = if section_idx == 0 {
-                        frame_y + label_box_h - theme.font_size * 0.15
+                        frame_y + label_box_h.max(block.height) * 0.5 + theme.font_size * 0.25
                     } else {
                         dividers
                             .get(section_idx - 1)
                             .copied()
                             .unwrap_or(frame_y + label_offset)
-                            + theme.font_size * 0.9
+                            + block.height * 0.5
+                            + theme.font_size * 0.3
                     };
                     let side_pad = theme.font_size * 0.45;
                     let frame_center_x = frame_x + frame_width / 2.0;
@@ -505,7 +600,8 @@ pub(super) fn compute_sequence_layout(
                     let label_x = if section_idx == 0 {
                         let preferred =
                             frame_x + label_box_w + theme.font_size * 3.0 + block.width / 2.0;
-                        let min_x = frame_x + block.width / 2.0 + theme.font_size * 0.4;
+                        let min_x =
+                            frame_x + label_box_w + block.width / 2.0 + theme.font_size * 0.4;
                         let max_x =
                             frame_x + frame_width - block.width / 2.0 - theme.font_size * 0.4;
                         clamp_or_midpoint(preferred, min_x, max_x)
@@ -544,6 +640,10 @@ pub(super) fn compute_sequence_layout(
         .unwrap_or(lifeline_start + base_spacing);
     for note in &sequence_notes {
         last_message_y = last_message_y.max(note.y + note.height);
+    }
+    last_message_y = last_message_y.max(message_cursor);
+    for frame in &sequence_frames {
+        last_message_y = last_message_y.max(frame.y + frame.height);
     }
     let lifeline_end = last_message_y + geometry.footbox_gap;
     let lifelines = participants
@@ -1397,6 +1497,8 @@ fn extend_bounds(
     *max_y = (*max_y).max(y + h);
 }
 
+/// Recompute sequence canvas bounds after label placement and translate the
+/// diagram as needed to keep its geometry within the measured canvas.
 pub(super) fn finalize_sequence_layout_bounds(layout: &mut Layout) {
     let DiagramData::Sequence(seq) = &mut layout.diagram else {
         return;
@@ -1610,6 +1712,70 @@ pub(super) fn finalize_sequence_layout_bounds(layout: &mut Layout) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_bounds_queries_match_direct_scan_for_nested_and_invalid_ranges() {
+        for count in [0, 1, 7, 32, 101] {
+            let bounds: Vec<_> = (0..count)
+                .map(|i| FrameBounds {
+                    min_x: (i * 17 % 23) as f32,
+                    max_x: (i * 11 % 29) as f32 + 30.0,
+                    min_y: i as f32 * 50.0,
+                    max_y: i as f32 * 50.0 + 40.0,
+                })
+                .collect();
+            let index = FrameBoundsIndex::new(bounds.iter().copied());
+            assert_eq!(index.tree.len(), count * 2);
+            for start in 0..count + 3 {
+                for end in 0..count + 3 {
+                    let expected = bounds
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .filter(|(i, _)| (start..end).contains(i))
+                        .fold(FrameBounds::EMPTY, |acc, (_, b)| acc.merge(b));
+                    assert_eq!(index.query(start..end), expected);
+                }
+            }
+            assert_eq!(index.query(usize::MAX..usize::MAX), FrameBounds::EMPTY);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual scaling benchmark; run optimized with --nocapture"]
+    fn performance_scaling_nested_frames() {
+        use std::hint::black_box;
+        for count in [128, 512, 2048] {
+            let mut source = String::from("sequenceDiagram\nparticipant A\nparticipant B\n");
+            for _ in 0..count {
+                source.push_str("loop condition\nnote right of A: note\nA->>B: message\n");
+            }
+            for _ in 0..count {
+                source.push_str("end\n");
+            }
+            let parsed = crate::parser::parse_mermaid(&source).unwrap();
+            let config = LayoutConfig {
+                fast_text_metrics: true,
+                ..LayoutConfig::default()
+            };
+            let theme = Theme::modern();
+            let mut samples = Vec::new();
+            for _ in 0..3 {
+                let start = std::time::Instant::now();
+                black_box(compute_sequence_layout(
+                    black_box(&parsed.graph),
+                    &theme,
+                    &config,
+                ));
+                samples.push(start.elapsed());
+            }
+            samples.sort();
+            println!(
+                "nested_frames,{count},{:.3}",
+                samples[1].as_secs_f64() * 1000.0
+            );
+        }
+    }
 
     #[test]
     fn sequence_center_label_prefers_optimal_gap_band() {

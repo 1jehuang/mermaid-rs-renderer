@@ -725,3 +725,68 @@ fn state_concurrent_regions_render_dividers_and_per_region_starts() {
         "three concurrent regions need exactly two dividers"
     );
 }
+
+/// No edge label's text may sit on a node or be crossed by another edge, and
+/// every label lies inside the canvas. A state diagram routes a back-edge down
+/// the outer margin; its label was clamped into the pre-label canvas, onto the
+/// node beside it, and fixed there. An ER label clear of its node was pulled
+/// back onto it by the attachment cap. The larger state diagram, with two
+/// back-edges down the margin, must stay clean as well.
+#[test]
+fn state_and_er_edge_labels_stay_clear_of_nodes() {
+    let cases = [
+        "stateDiagram-v2\n    [*] --> Clean\n    Clean --> Dirty : keystroke\n    Dirty --> Saving : pause\n    Saving --> Clean : written\n    Saving --> Dirty : keystroke\n",
+        "erDiagram\n    NOTE ||--o{ VERSION : keeps\n    NOTE ||--o| DRAFT : has\n    NOTE }o--o{ TAG : carries\n",
+        // A larger state diagram with two back-edges down the margin.
+        "stateDiagram-v2\n    [*] --> CLOSED\n    CLOSED --> OPEN : 5 consecutive failures\n    OPEN --> HALF_OPEN : probe interval elapsed\n    HALF_OPEN --> CLOSED : probe succeeds\n    HALF_OPEN --> OPEN : probe fails (increased backoff)\n\n    CLOSED : All DB calls pass through\n    CLOSED : Counting consecutive failures\n    OPEN : DB calls skipped (sleep for probe interval)\n    OPEN : No writes attempted\n    HALF_OPEN : One probe call allowed through\n",
+    ];
+    for input in cases {
+        let (_, layout, _) = render(input);
+        for (i, edge) in layout.edges.iter().enumerate() {
+            let (Some(label), Some((cx, cy))) = (&edge.label, edge.label_anchor) else {
+                continue;
+            };
+            let text = label.lines.join(" ");
+            let (x0, y0) = (cx - label.width / 2.0, cy - label.height / 2.0);
+            let (x1, y1) = (x0 + label.width, y0 + label.height);
+            assert!(
+                x0 >= -0.5 && y0 >= -0.5 && x1 <= layout.width + 0.5 && y1 <= layout.height + 0.5,
+                "label {text:?} at ({x0:.1},{y0:.1})-({x1:.1},{y1:.1}) outside the {}x{} canvas",
+                layout.width,
+                layout.height
+            );
+            for (id, node) in &layout.nodes {
+                let overlap = x0 < node.x + node.width
+                    && node.x < x1
+                    && y0 < node.y + node.height
+                    && node.y < y1;
+                assert!(
+                    !overlap,
+                    "label {text:?} at ({x0:.1},{y0:.1})-({x1:.1},{y1:.1}) overlaps node {id} at ({:.1},{:.1}) {}x{}",
+                    node.x, node.y, node.width, node.height
+                );
+            }
+            // Strictly inside the text, sampled along each segment of every
+            // other edge.
+            let inside =
+                |(x, y): (f32, f32)| x > x0 + 1.0 && x < x1 - 1.0 && y > y0 + 1.0 && y < y1 - 1.0;
+            for (j, other) in layout.edges.iter().enumerate() {
+                let crosses = j != i
+                    && other.points.windows(2).any(|s| {
+                        (0..=64).any(|k| {
+                            let t = k as f32 / 64.0;
+                            inside((
+                                s[0].0 + (s[1].0 - s[0].0) * t,
+                                s[0].1 + (s[1].1 - s[0].1) * t,
+                            ))
+                        })
+                    });
+                assert!(
+                    !crosses,
+                    "label {text:?} is crossed by edge {}->{}",
+                    other.from, other.to
+                );
+            }
+        }
+    }
+}

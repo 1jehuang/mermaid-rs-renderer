@@ -307,6 +307,8 @@ pub struct SequenceFrame {
     pub sections: Vec<SequenceFrameSection>,
     pub start_idx: usize,
     pub end_idx: usize,
+    /// Half-open range into Graph::sequence_notes, preserving notes at frame boundaries.
+    pub note_range: std::ops::Range<usize>,
 }
 
 impl Direction {

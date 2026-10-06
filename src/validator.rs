@@ -258,17 +258,30 @@ fn is_block_group_open(trimmed: &str) -> bool {
 
 /// Path 4: lines that begin with an arrow operator.
 ///
-/// `--> X`, `---> X`, `==> X`, etc., with no source node before
-/// the arrow, are illegal in every mmdr-supported diagram kind.
-/// This catches accidental pastes or omitted source identifiers.
+/// `--> X`, `---> X`, `==> X`, etc. require a source node. Flowcharts
+/// may continue an eligible statement from the preceding non-comment line;
+/// other leading arrows indicate accidental pastes or omitted identifiers.
 fn check_leading_arrow(lines: &[&str]) -> Result<(), ParseError> {
+    let flowchart = detect_balance_kind(lines) == BalanceKind::Flowchart;
+    let mut previous = "";
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = u32_from_index(idx);
-        let trimmed = raw.trim_start();
+        // Use the same quote-aware normalization as parser preprocessing.
+        let trimmed = crate::parser::strip_trailing_comment(raw);
         if trimmed.is_empty() || trimmed.starts_with("%%") {
             continue;
         }
         if starts_with_arrow(trimmed) {
+            if flowchart
+                && crate::parser::starts_with_edge_token(trimmed)
+                && crate::parser::accepts_edge_continuation(previous)
+            {
+                // A continuation starts with an operator, so only its trailing
+                // semicolon can prevent another continuation. Borrow this line
+                // instead of repeatedly copying the accumulated statement.
+                previous = trimmed;
+                continue;
+            }
             let col = col_of_first_nonws(raw);
             let found_token: String = trimmed.chars().take_while(|c| !c.is_whitespace()).collect();
             return Err(ParseError::UnexpectedToken {
@@ -278,6 +291,7 @@ fn check_leading_arrow(lines: &[&str]) -> Result<(), ParseError> {
                 expected: "node identifier".to_string(),
             });
         }
+        previous = trimmed;
     }
     Ok(())
 }

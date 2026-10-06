@@ -27,7 +27,8 @@ jobs:
       - name: Check repository documentation and tooling
         run: python3 scripts/check_repo.py
       - run: cargo fmt -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run Clippy (all targets and features)
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo check --locked --no-default-features
       - run: cargo check --locked --no-default-features --features cli
       - run: cargo check --locked --no-default-features --features png

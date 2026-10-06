@@ -822,6 +822,35 @@ fn pie_all_zero_values_use_equal_finite_slices() {
 }
 
 #[test]
+fn quadrant_wrapped_boundary_labels_preserve_coordinates_inside_canvas() {
+    let parsed = parse_mermaid(
+        "quadrantChart\n  Long wrapped top boundary point label: [0, 1]\n  Long wrapped bottom boundary point label: [1, 0]\n",
+    )
+    .unwrap();
+    for fast_text_metrics in [false, true] {
+        let config = LayoutConfig {
+            max_label_width_chars: 8,
+            fast_text_metrics,
+            ..LayoutConfig::default()
+        };
+        let layout = compute_layout(&parsed.graph, &Theme::modern(), &config);
+        let DiagramData::Quadrant(quadrant) = &layout.diagram else {
+            panic!("expected quadrant")
+        };
+        for point in &quadrant.points {
+            assert!(
+                point.label.lines.len() > 2,
+                "fixture must force tall labels"
+            );
+            assert!(point.y - point.label.height / 2.0 >= 0.0);
+            assert!(point.y + point.label.height / 2.0 <= layout.height);
+        }
+        assert_eq!(quadrant.points[0].y, quadrant.grid_y);
+        assert_eq!(quadrant.points[1].y, quadrant.grid_y + quadrant.grid_height);
+    }
+}
+
+#[test]
 fn quadrant_point_label_bboxes_stay_inside_canvas() {
     let parsed = parse_mermaid(
         "quadrantChart\n  Very long left boundary label: [0, 1]\n  Much much longer right boundary point label: [1, 0]\n",

@@ -240,6 +240,69 @@ pub fn compute_layout_with_metrics(
     (layout, stage_metrics)
 }
 
+/// Index only groups with a local direction. Walking the sorted membership
+/// lists of each edge endpoint avoids scanning every edge for every group.
+fn externally_connected_subgraphs(graph: &Graph) -> Vec<usize> {
+    if graph.kind != crate::ir::DiagramKind::Flowchart {
+        return Vec::new();
+    }
+    let mut memberships: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (index, group) in graph.subgraphs.iter().enumerate() {
+        if group.direction.is_none() {
+            continue;
+        }
+        for node in &group.nodes {
+            let groups = memberships.entry(node.as_str()).or_default();
+            if groups.last() != Some(&index) {
+                groups.push(index);
+            }
+        }
+    }
+    if memberships.is_empty() {
+        return Vec::new();
+    }
+    let mut connected = vec![false; graph.subgraphs.len()];
+    for edge in &graph.edges {
+        let from = memberships
+            .get(edge.from.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let to = memberships
+            .get(edge.to.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let (mut a, mut b) = (0, 0);
+        while a < from.len() || b < to.len() {
+            match (from.get(a), to.get(b)) {
+                (Some(&left), Some(&right)) if left == right => {
+                    a += 1;
+                    b += 1;
+                }
+                (Some(&left), Some(&right)) if left < right => {
+                    connected[left] = true;
+                    a += 1;
+                }
+                (Some(&left), None) => {
+                    connected[left] = true;
+                    a += 1;
+                }
+                (_, Some(&right)) => {
+                    connected[right] = true;
+                    b += 1;
+                }
+                (None, None) => break,
+            }
+        }
+    }
+    connected
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, crosses)| crosses.then_some(i))
+        .collect()
+}
+
+/// Materialize implicit nodes and inherited flowchart directions on a copy only
+/// when needed, preserving the caller's graph and borrowing already normalized input.
 fn normalize_graph_for_layout(graph: &Graph) -> Cow<'_, Graph> {
     let needs_edge_nodes = graph
         .edges
@@ -253,11 +316,17 @@ fn normalize_graph_for_layout(graph: &Graph) -> Cow<'_, Graph> {
         .iter()
         .any(|id| !graph.nodes.contains_key(id));
 
-    if !needs_edge_nodes && !needs_sequence_nodes {
+    let connected_groups = externally_connected_subgraphs(graph);
+    if !needs_edge_nodes && !needs_sequence_nodes && connected_groups.is_empty() {
         return Cow::Borrowed(graph);
     }
 
     let mut normalized = graph.clone();
+    // Mermaid inherits the outer direction when a group's members link outside.
+    // Edges to the group itself are not member edges and do not trigger this rule.
+    for index in connected_groups {
+        normalized.subgraphs[index].direction = None;
+    }
     for edge in &graph.edges {
         normalized.ensure_node(&edge.from, None, None);
         normalized.ensure_node(&edge.to, None, None);
@@ -1599,6 +1668,82 @@ fn requirement_edge_label_text(label: &str, config: &LayoutConfig) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn indexed_subgraph_boundaries_match_membership_scan() {
+        let mut graph = crate::parser::parse_mermaid(
+            "flowchart TD\n A --> B\n B --> C\n C --> D\n D --> D\n Group --> A",
+        )
+        .unwrap()
+        .graph;
+        let ids = ["A", "B", "C", "D", "Group"];
+        for mask in 0..32 {
+            graph.subgraphs.push(crate::ir::Subgraph {
+                id: Some("Group".into()),
+                label: String::new(),
+                nodes: ids
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| mask & (1 << i) != 0)
+                    .flat_map(|(_, id)| [id.to_string(), id.to_string()])
+                    .collect(),
+                direction: (mask % 3 != 0).then_some(Direction::LeftRight),
+                icon: None,
+            });
+        }
+        let expected: Vec<_> = graph
+            .subgraphs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, group)| {
+                (group.direction.is_some()
+                    && graph.edges.iter().any(|edge| {
+                        group.nodes.contains(&edge.from) != group.nodes.contains(&edge.to)
+                    }))
+                .then_some(i)
+            })
+            .collect();
+        assert_eq!(externally_connected_subgraphs(&graph), expected);
+        graph.kind = crate::ir::DiagramKind::State;
+        assert!(externally_connected_subgraphs(&graph).is_empty());
+    }
+
+    #[test]
+    #[ignore = "manual scaling benchmark; run optimized with --nocapture"]
+    fn performance_scaling_subgraphs() {
+        use std::hint::black_box;
+        let template = crate::parser::parse_mermaid("flowchart TD\n A --> B")
+            .unwrap()
+            .graph;
+        for count in [128, 512, 2048] {
+            let mut graph = Graph::new();
+            for i in 0..count {
+                let from = format!("A{i}");
+                let to = format!("B{i}");
+                graph.ensure_node(&from, None, None);
+                graph.ensure_node(&to, None, None);
+                let mut edge = template.edges[0].clone();
+                edge.from = from.clone();
+                edge.to = to.clone();
+                graph.edges.push(edge);
+                graph.subgraphs.push(crate::ir::Subgraph {
+                    id: None,
+                    label: String::new(),
+                    nodes: vec![from, to],
+                    direction: Some(Direction::LeftRight),
+                    icon: None,
+                });
+            }
+            let mut samples = Vec::new();
+            for _ in 0..5 {
+                let start = Instant::now();
+                black_box(normalize_graph_for_layout(black_box(&graph)));
+                samples.push(start.elapsed());
+            }
+            samples.sort();
+            println!("subgraphs,{count},{:.3}", samples[2].as_secs_f64() * 1000.0);
+        }
+    }
     use super::*;
     use crate::ir::{Direction, Graph, NodeShape};
     use crate::layout::ranking::rank_edges_for_manual_layout;
@@ -2295,7 +2440,7 @@ flowchart LR
     }
 
     #[test]
-    fn flowchart_subgraph_direction_fixture_keeps_lr_members_horizontal() {
+    fn connected_flowchart_subgraph_inherits_outer_direction() {
         let source =
             include_str!("../../tests/fixtures/layout_regressions/flowchart_subgraph_dir.mmd");
         let parsed = parse_mermaid(source).expect("failed to parse flowchart fixture");
@@ -2306,13 +2451,15 @@ flowchart LR
         let c = layout.nodes.get("C").unwrap();
 
         assert!(
-            a.x < b.x && b.x < c.x,
-            "LR subgraph should progress horizontally"
+            a.y < b.y && b.y < c.y,
+            "externally connected subgraph should inherit outer TD direction"
         );
-        assert!(
-            (a.y - b.y).abs() < 1.0 && (b.y - c.y).abs() < 1.0,
-            "LR subgraph should stay aligned on the cross-axis"
-        );
+        let inherited = parse_mermaid(&source.replace("direction LR", "")).unwrap();
+        let expected = compute_layout(&inherited.graph, &Theme::modern(), &LayoutConfig::default());
+        for id in ["A", "B", "C"] {
+            assert_eq!(layout.nodes[id].x, expected.nodes[id].x);
+            assert_eq!(layout.nodes[id].y, expected.nodes[id].y);
+        }
     }
 
     #[test]

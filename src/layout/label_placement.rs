@@ -6,7 +6,7 @@ use super::{EdgeLayout, NodeLayout, SubgraphLayout, TextBlock};
 use crate::config::LayoutConfig;
 use crate::ir::DiagramKind;
 use crate::theme::Theme;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const LABEL_OVERLAP_WIDE_THRESHOLD: f32 = 1e-4;
 const LABEL_ANCHOR_FRACTIONS: [f32; 5] = [0.5, 0.35, 0.65, 0.2, 0.8];
@@ -294,6 +294,7 @@ fn resolve_center_labels(
         vec![None; edges.len()]
     };
     let mut fixed_center_indices: HashSet<usize> = HashSet::new();
+    let mut released_indices: HashSet<usize> = HashSet::new();
     for (idx, edge) in edges.iter_mut().enumerate() {
         let (Some(label), Some(anchor)) = (&edge.label, edge.label_anchor) else {
             continue;
@@ -329,6 +330,18 @@ fn resolve_center_labels(
             // bidirectional graphs can produce overlapping reserved centers, and
             // the flowchart-specific de-overlap pass below needs freedom to move
             // them to nearby clear positions.
+            continue;
+        }
+        // A label the clamp pushed onto a node is not fixed there: an edge
+        // routed along the canvas edge would otherwise keep its label on the
+        // node beside it. The search below moves it, unclamped, and the graph
+        // bounds finalization grows the canvas to fit it.
+        if clamped != anchor
+            && occupied_grid.query(&rect).any(|index| {
+                index < node_obstacle_count && overlap_area(&rect, &occupied[index]) > 0.0
+            })
+        {
+            released_indices.insert(idx);
             continue;
         }
         occupied_grid.insert(occupied.len(), &occupied_rect);
@@ -375,6 +388,11 @@ fn resolve_center_labels(
     });
 
     for idx in order {
+        let bounds = if released_indices.contains(&idx) {
+            None
+        } else {
+            bounds
+        };
         let label = match edges[idx].label.clone() {
             Some(l) => l,
             None => continue,
@@ -1754,6 +1772,8 @@ fn center_label_attachment_cap(kind: DiagramKind) -> Option<f32> {
     }
 }
 
+/// Bring unlocked labels within their diagram-specific edge gap while checking
+/// node collisions, label collisions, and foreign-edge crossings through spatial indexes.
 fn enforce_center_label_attachment_caps(
     edges: &mut [EdgeLayout],
     nodes: &BTreeMap<String, NodeLayout>,
@@ -1785,9 +1805,45 @@ fn enforce_center_label_attachment_caps(
         node_obstacle_pad,
         subgraph_label_pad,
     );
+    let static_grid = ObstacleGrid::new(48.0, &static_obstacles);
+    let node_rects: Vec<_> = nodes
+        .values()
+        .map(|node| (node.x, node.y, node.width, node.height))
+        .collect();
+    let node_grid = ObstacleGrid::new(48.0, &node_rects);
+    // Paths do not change during attachment correction. Index segments once,
+    // rather than cloning and scanning every path for every candidate.
+    let segments: Vec<_> = edges
+        .iter()
+        .enumerate()
+        .flat_map(|(index, edge)| {
+            edge.points
+                .windows(2)
+                .map(move |pair| (index, pair[0], pair[1]))
+        })
+        .collect();
+    let segment_rects: Vec<_> = segments
+        .iter()
+        .map(|(_, a, b)| {
+            inflate_rect(
+                (
+                    a.0.min(b.0),
+                    a.1.min(b.1),
+                    (a.0 - b.0).abs(),
+                    (a.1 - b.1).abs(),
+                ),
+                1e-3,
+            )
+        })
+        .collect();
+    let segment_grid = ObstacleGrid::new(48.0, &segment_rects);
     let nudge_weight = if kind == DiagramKind::Er { 0.04 } else { 0.06 };
 
     for _ in 0..2 {
+        let mut edges_text: Vec<Option<Rect>> = edges
+            .iter()
+            .map(|edge| Some(label_core_rect(edge.label_anchor?, edge.label.as_ref()?)))
+            .collect();
         let current_label_rects: Vec<Option<Rect>> = edges
             .iter()
             .map(|edge| {
@@ -1802,6 +1858,19 @@ fn enforce_center_label_attachment_caps(
                 ))
             })
             .collect();
+
+        let mut text_grid = ObstacleGrid::new(48.0, &[]);
+        let mut label_grid = ObstacleGrid::new(48.0, &[]);
+        for (index, rect) in edges_text.iter().enumerate() {
+            if let Some(rect) = rect {
+                text_grid.insert(index, rect);
+            }
+        }
+        for (index, rect) in current_label_rects.iter().enumerate() {
+            if let Some(rect) = rect {
+                label_grid.insert(index, rect);
+            }
+        }
 
         for (idx, edge) in edges.iter_mut().enumerate() {
             if locked_indices.contains(&idx) {
@@ -1870,53 +1939,134 @@ fn enforce_center_label_attachment_caps(
                 }
             }
             push_center_unique(&mut candidates, center);
-            if candidates.is_empty() {
-                continue;
-            }
-
+            // Then along the rest of the edge — tried only when none of the
+            // above moves the label, so that a spot on a node or across an
+            // edge (skipped below) is not the only way to stay attached.
+            let base_len = candidates.len();
+            // What the text itself — not its padded box — covers: node area, and
+            // other edges crossing it. A move may not make either worse; the
+            // score below weighs both far under the distance to its own edge.
+            let on_nodes = |center: (f32, f32)| -> f32 {
+                let text = label_core_rect(center, label);
+                node_grid.overlap_sum(&text, &node_rects)
+            };
+            let crossings = |center: (f32, f32)| {
+                let text = label_core_rect(center, label);
+                let mut crossed = HashSet::new();
+                for segment in segment_grid.query(&text) {
+                    let (other, a, b) = segments[segment];
+                    if other != idx
+                        && !crossed.contains(&other)
+                        && segment_intersects_rect(a, b, &text)
+                    {
+                        crossed.insert(other);
+                    }
+                }
+                crossed.len()
+            };
+            let on_labels = |center: (f32, f32)| {
+                let text = label_core_rect(center, label);
+                text_grid
+                    .query(&text)
+                    .filter(|&other| {
+                        other != idx
+                            && edges_text[other].is_some_and(|r| overlap_area(&text, &r) > 0.0)
+                    })
+                    .count()
+            };
+            let current_on_nodes = on_nodes(center);
             let mut best = center;
             let mut best_score = f32::INFINITY;
-            for cand in candidates {
-                let rect = (
-                    cand.0 - label.width * 0.5 - label_pad_x,
-                    cand.1 - label.height * 0.5 - label_pad_y,
-                    label.width + 2.0 * label_pad_x,
-                    label.height + 2.0 * label_pad_y,
-                );
-                let gap = polyline_rect_distance(&edge.points, &rect);
-                let center_dist = point_polyline_distance(cand, &edge.points);
-                if !gap.is_finite() {
-                    continue;
-                }
-                let mut overlap = 0.0f32;
-                for obstacle in &static_obstacles {
-                    overlap += overlap_area(&rect, obstacle);
-                }
-                for (other_idx, other_rect_opt) in current_label_rects.iter().enumerate() {
-                    if other_idx == idx {
+            for phase in 0..2 {
+                // Generate fallback candidates and query crossing counts only
+                // when the nearest-anchor candidates could not move the label.
+                let (start, current_crossings, current_on_labels) = if phase == 1 {
+                    if best != center {
+                        break;
+                    }
+                    for (ax, ay, dx, dy) in LABEL_ANCHOR_FRACTIONS
+                        .iter()
+                        .filter_map(|frac| edge_label_anchor_at_fraction(edge, *frac))
+                        .chain(edge_segment_anchors(edge, LABEL_EXTRA_SEGMENT_ANCHORS))
+                    {
+                        for offset in offsets {
+                            for side in [1.0, -1.0] {
+                                let mut cand = (ax - dy * offset * side, ay + dx * offset * side);
+                                if let Some(bound) = bounds {
+                                    cand = clamp_label_center_to_bounds(
+                                        cand,
+                                        label.width,
+                                        label.height,
+                                        label_pad_x,
+                                        label_pad_y,
+                                        bound,
+                                    );
+                                }
+                                push_center_unique(&mut candidates, cand);
+                            }
+                        }
+                    }
+                    (base_len, crossings(center), on_labels(center))
+                } else {
+                    (0, 0, 0)
+                };
+                for (k, &cand) in candidates.iter().enumerate().skip(start) {
+                    let rect = (
+                        cand.0 - label.width * 0.5 - label_pad_x,
+                        cand.1 - label.height * 0.5 - label_pad_y,
+                        label.width + 2.0 * label_pad_x,
+                        label.height + 2.0 * label_pad_y,
+                    );
+                    let gap = polyline_rect_distance(&edge.points, &rect);
+                    let center_dist = point_polyline_distance(cand, &edge.points);
+                    if !gap.is_finite() {
                         continue;
                     }
-                    if let Some(other_rect) = other_rect_opt {
-                        overlap += overlap_area(&rect, other_rect);
+                    let mut overlap = static_grid.overlap_sum(&rect, &static_obstacles);
+                    if on_nodes(cand) > current_on_nodes + 0.5
+                        || (k >= base_len
+                            && (crossings(cand) > current_crossings
+                                || on_labels(cand) > current_on_labels))
+                    {
+                        continue;
+                    }
+                    // Preserve the previous index order for floating-point sums.
+                    let nearby = label_grid.query_ordered(&rect);
+                    for other in nearby {
+                        if other != idx
+                            && let Some(other_rect) = current_label_rects[other]
+                        {
+                            overlap += overlap_area(&rect, &other_rect);
+                        }
+                    }
+                    if let Some(bound) = bounds {
+                        overlap += outside_area(&rect, bound);
+                    }
+                    let gap_over = (gap - max_gap).max(0.0);
+                    let move_dx = cand.0 - center.0;
+                    let move_dy = cand.1 - center.1;
+                    let move_dist = (move_dx * move_dx + move_dy * move_dy).sqrt();
+                    let center_over = (center_dist - max_gap).max(0.0);
+                    let score = gap_over * 32.0
+                        + center_over * 40.0
+                        + (gap - target_gap).abs() * 0.9
+                        + overlap * 0.06
+                        + move_dist * nudge_weight;
+                    if score < best_score {
+                        best_score = score;
+                        best = cand;
                     }
                 }
-                if let Some(bound) = bounds {
-                    overlap += outside_area(&rect, bound);
+            }
+            // Keep the live text index in sync for subsequent labels, while
+            // the padded score rectangles remain a snapshot of this round.
+            if best != center {
+                if let Some(old) = edges_text[idx] {
+                    text_grid.remove(idx, &old);
                 }
-                let gap_over = (gap - max_gap).max(0.0);
-                let move_dx = cand.0 - center.0;
-                let move_dy = cand.1 - center.1;
-                let move_dist = (move_dx * move_dx + move_dy * move_dy).sqrt();
-                let center_over = (center_dist - max_gap).max(0.0);
-                let score = gap_over * 32.0
-                    + center_over * 40.0
-                    + (gap - target_gap).abs() * 0.9
-                    + overlap * 0.06
-                    + move_dist * nudge_weight;
-                if score < best_score {
-                    best_score = score;
-                    best = cand;
-                }
+                let rect = label_core_rect(best, label);
+                text_grid.insert(idx, &rect);
+                edges_text[idx] = Some(rect);
             }
             edge.label_anchor = Some(best);
         }
@@ -3715,62 +3865,134 @@ fn clamp_label_center_to_bounds(
     (x, y)
 }
 
-/// Spatial index for fast overlap queries during label placement.
+/// Spatial index for overlap queries. Oversized rectangles bypass cell
+/// enumeration, bounding storage and work independently of canvas coordinates.
 struct ObstacleGrid {
     cell: f32,
-    /// Maps grid cell (ix, iy) to indices into the obstacle list.
     cells: HashMap<(i32, i32), Vec<usize>>,
+    oversized: BTreeSet<usize>,
+    indices: BTreeSet<usize>,
 }
 
 impl ObstacleGrid {
+    const MAX_CELLS: i64 = 256;
+
+    /// Index rectangles by slice position, enforcing a minimum cell size of 16 units.
     fn new(cell: f32, rects: &[Rect]) -> Self {
-        let cell = cell.max(16.0);
-        let mut cells: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-        for (i, rect) in rects.iter().enumerate() {
-            let x0 = (rect.0 / cell).floor() as i32;
-            let y0 = (rect.1 / cell).floor() as i32;
-            let x1 = ((rect.0 + rect.2) / cell).floor() as i32;
-            let y1 = ((rect.1 + rect.3) / cell).floor() as i32;
-            for ix in x0..=x1 {
-                for iy in y0..=y1 {
-                    cells.entry((ix, iy)).or_default().push(i);
+        let mut grid = Self {
+            cell: cell.max(16.0),
+            cells: HashMap::new(),
+            oversized: BTreeSet::new(),
+            indices: BTreeSet::new(),
+        };
+        for (index, rect) in rects.iter().enumerate() {
+            grid.insert(index, rect);
+        }
+        grid
+    }
+
+    /// Return inclusive cell bounds only when enumerating them fits the cell budget.
+    /// Invalid or oversized rectangles use the conservative full-scan path.
+    fn cell_range(&self, rect: &Rect) -> Option<(i32, i32, i32, i32)> {
+        if ![rect.0, rect.1, rect.2, rect.3]
+            .iter()
+            .all(|value| value.is_finite())
+            || rect.2 < 0.0
+            || rect.3 < 0.0
+        {
+            return None;
+        }
+        let x0 = (rect.0 / self.cell).floor() as i32;
+        let y0 = (rect.1 / self.cell).floor() as i32;
+        let x1 = ((rect.0 + rect.2) / self.cell).floor() as i32;
+        let y1 = ((rect.1 + rect.3) / self.cell).floor() as i32;
+        let width = i64::from(x1) - i64::from(x0) + 1;
+        let height = i64::from(y1) - i64::from(y0) + 1;
+        (width.checked_mul(height)? <= Self::MAX_CELLS).then_some((x0, y0, x1, y1))
+    }
+
+    /// Insert a new obstacle index; remove its old rectangle before moving it.
+    fn insert(&mut self, index: usize, rect: &Rect) {
+        self.indices.insert(index);
+        if let Some((x0, y0, x1, y1)) = self.cell_range(rect) {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    self.cells.entry((x, y)).or_default().push(index);
+                }
+            }
+        } else {
+            self.oversized.insert(index);
+        }
+    }
+
+    /// Remove an obstacle using its original bounds and discard empty cell buckets.
+    fn remove(&mut self, index: usize, rect: &Rect) {
+        self.indices.remove(&index);
+        self.oversized.remove(&index);
+        if let Some((x0, y0, x1, y1)) = self.cell_range(rect) {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                        self.cells.entry((x, y))
+                    {
+                        entry.get_mut().retain(|&item| item != index);
+                        if entry.get().is_empty() {
+                            entry.remove();
+                        }
+                    }
                 }
             }
         }
-        Self { cell, cells }
     }
 
-    /// Add a new obstacle at the given index to the grid.
-    fn insert(&mut self, idx: usize, rect: &Rect) {
-        let x0 = (rect.0 / self.cell).floor() as i32;
-        let y0 = (rect.1 / self.cell).floor() as i32;
-        let x1 = ((rect.0 + rect.2) / self.cell).floor() as i32;
-        let y1 = ((rect.1 + rect.3) / self.cell).floor() as i32;
-        for ix in x0..=x1 {
-            for iy in y0..=y1 {
-                self.cells.entry((ix, iy)).or_default().push(idx);
-            }
-        }
-    }
-
-    /// Return indices of obstacles that could overlap with `rect`.
+    /// Yield unique candidate indices, including oversized obstacles.
+    /// Candidates can be false positives and require an exact geometry check.
     fn query(&self, rect: &Rect) -> impl Iterator<Item = usize> + '_ {
-        let x0 = (rect.0 / self.cell).floor() as i32;
-        let y0 = (rect.1 / self.cell).floor() as i32;
-        let x1 = ((rect.0 + rect.2) / self.cell).floor() as i32;
-        let y1 = ((rect.1 + rect.3) / self.cell).floor() as i32;
+        let range = self.cell_range(rect);
+        let (x0, y0, x1, y1) = range.unwrap_or((0, 0, -1, -1));
+        let fallback = if range.is_some() {
+            &self.oversized
+        } else {
+            &self.indices
+        };
         let mut seen = HashSet::new();
         (x0..=x1)
-            .flat_map(move |ix| (y0..=y1).map(move |iy| (ix, iy)))
+            .flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
             .flat_map(move |key| {
                 self.cells
                     .get(&key)
-                    .map(|v| v.as_slice())
+                    .map(Vec::as_slice)
                     .unwrap_or(&[])
                     .iter()
                     .copied()
             })
-            .filter(move |idx| seen.insert(*idx))
+            .chain(fallback.iter().copied())
+            .filter(move |index| seen.insert(*index))
+    }
+
+    /// Preserve summation order without adding a sorting bottleneck in dense
+    /// diagrams. If sorting the hits would cost more than a full ordered scan,
+    /// return all obstacles; exact overlap checks discard the extra candidates.
+    fn query_ordered(&self, rect: &Rect) -> Vec<usize> {
+        let mut nearby: Vec<_> = self.query(rect).collect();
+        let sort_work = nearby
+            .len()
+            .saturating_mul(nearby.len().checked_ilog2().unwrap_or(0) as usize + 1);
+        if sort_work > self.indices.len() {
+            self.indices.iter().copied().collect()
+        } else {
+            nearby.sort_unstable();
+            nearby
+        }
+    }
+
+    /// Sum exact overlaps in source-index order to preserve floating-point results.
+    /// The obstacle slice must contain the current rectangle for every indexed entry.
+    fn overlap_sum(&self, rect: &Rect, obstacles: &[Rect]) -> f32 {
+        self.query_ordered(rect)
+            .into_iter()
+            .map(|index| overlap_area(rect, &obstacles[index]))
+            .sum()
     }
 }
 
@@ -4104,6 +4326,177 @@ fn edge_endpoint_label_position_with_avoid(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spatial_queries_match_brute_force_and_bound_coordinate_expansion() {
+        let mut rects: Vec<Rect> = (0..1000)
+            .map(|i| {
+                (
+                    (i % 40) as f32 * 91.0 - 900.0,
+                    (i / 40) as f32 * 73.0 - 800.0,
+                    (i % 7) as f32 * 17.0,
+                    (i % 11) as f32 * 13.0,
+                )
+            })
+            .collect();
+        rects.push((-1e12, -1e12, 2e12, 2e12));
+        let mut grid = ObstacleGrid::new(48.0, &rects);
+        assert!(
+            grid.cells.values().map(Vec::len).sum::<usize>()
+                <= rects.len() * ObstacleGrid::MAX_CELLS as usize
+        );
+        for query in rects.iter().step_by(7).chain(rects.last()) {
+            let hits: HashSet<_> = grid.query(query).collect();
+            for (index, rect) in rects.iter().enumerate() {
+                if overlap_area(query, rect) > 0.0 {
+                    assert!(hits.contains(&index));
+                }
+            }
+            assert_eq!(
+                grid.overlap_sum(query, &rects),
+                rects.iter().map(|r| overlap_area(query, r)).sum::<f32>()
+            );
+        }
+        // Movement must remove stale entries, including oversized obstacles.
+        let last = rects.len() - 1;
+        grid.remove(last, &rects[last]);
+        assert!(!grid.query(&(0.0, 0.0, 10.0, 10.0)).any(|i| i == last));
+        let old = rects[0];
+        grid.remove(0, &old);
+        rects[0] = (1e6, 1e6, 10.0, 10.0);
+        grid.insert(0, &rects[0]);
+        assert!(!grid.query(&old).any(|i| i == 0));
+        assert!(grid.query(&rects[0]).any(|i| i == 0));
+    }
+
+    #[test]
+    fn spatial_queries_visit_only_local_obstacles_on_sparse_diagrams() {
+        let rects: Vec<_> = (0..10_000)
+            .map(|i| (i as f32 * 128.0, 0.0, 16.0, 16.0))
+            .collect();
+        let grid = ObstacleGrid::new(48.0, &rects);
+        for rect in rects.iter().step_by(101) {
+            assert_eq!(grid.query(rect).count(), 1);
+        }
+    }
+
+    #[test]
+    fn segment_index_keeps_touches_and_counts_each_crossed_edge_once() {
+        let paths: [Vec<(f32, f32)>; 3] = [
+            vec![(48.0, -20.0), (48.0, 48.0), (80.0, 48.0)],
+            vec![(-1e9, -1e9), (1e9, 1e9)],
+            vec![(500.0, 500.0), (600.0, 600.0)],
+        ];
+        let segments: Vec<_> = paths
+            .iter()
+            .enumerate()
+            .flat_map(|(i, path)| path.windows(2).map(move |p| (i, p[0], p[1])))
+            .collect();
+        let rects: Vec<_> = segments
+            .iter()
+            .map(|(_, a, b)| {
+                inflate_rect(
+                    (
+                        a.0.min(b.0),
+                        a.1.min(b.1),
+                        (a.0 - b.0).abs(),
+                        (a.1 - b.1).abs(),
+                    ),
+                    1e-3,
+                )
+            })
+            .collect();
+        let grid = ObstacleGrid::new(48.0, &rects);
+        for query in [
+            (48.0, 48.0, 1.0, 1.0),
+            (47.99995, 0.0, 0.0, 10.0),
+            (510.0, 510.0, 20.0, 20.0),
+        ] {
+            let indexed: HashSet<_> = grid
+                .query(&query)
+                .filter_map(|i| {
+                    let (edge, a, b) = segments[i];
+                    segment_intersects_rect(a, b, &query).then_some(edge)
+                })
+                .collect();
+            let expected: HashSet<_> = paths
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| path_intersects_rect(p, &query).then_some(i))
+                .collect();
+            assert_eq!(indexed, expected);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual scaling benchmark; run optimized with --nocapture"]
+    fn performance_scaling_attachment() {
+        attachment_scaling(false);
+    }
+
+    #[test]
+    #[ignore = "manual scaling benchmark; run optimized with --nocapture"]
+    fn performance_scaling_dense_attachment() {
+        attachment_scaling(true);
+    }
+
+    fn attachment_scaling(dense: bool) {
+        use std::hint::black_box;
+        use std::time::Instant;
+        let parsed = crate::parser::parse_mermaid("stateDiagram-v2\n A --> B: label").unwrap();
+        let theme = Theme::modern();
+        let config = LayoutConfig {
+            fast_text_metrics: true,
+            ..LayoutConfig::default()
+        };
+        let template = crate::layout::compute_layout(&parsed.graph, &theme, &config);
+        for count in [128, 512, 2048] {
+            let mut nodes = BTreeMap::new();
+            let mut edges = Vec::new();
+            for i in 0..count {
+                let x = if dense { 0.0 } else { (i % 64) as f32 * 240.0 };
+                let y = if dense { 0.0 } else { (i / 64) as f32 * 240.0 };
+                let mut node = template.nodes.values().next().unwrap().clone();
+                node.x = x;
+                node.y = y;
+                node.width = 40.0;
+                node.height = 30.0;
+                nodes.insert(format!("N{i}"), node);
+                let mut edge = template.edges[0].clone();
+                edge.points = vec![(x, y + 50.0), (x + 160.0, y + 50.0)];
+                edge.label_anchor = Some((x + 80.0, y + 130.0));
+                edges.push(edge);
+            }
+            let mut samples = Vec::new();
+            for _ in 0..3 {
+                let mut work = edges.clone();
+                let start = Instant::now();
+                enforce_center_label_attachment_caps(
+                    &mut work,
+                    &nodes,
+                    &[],
+                    None,
+                    DiagramKind::State,
+                    &theme,
+                    3.0,
+                    1.6,
+                    &HashSet::new(),
+                );
+                samples.push(start.elapsed());
+                black_box(work);
+            }
+            samples.sort();
+            println!(
+                "{},{count},{:.3}",
+                if dense {
+                    "dense_attachment"
+                } else {
+                    "attachment"
+                },
+                samples[1].as_secs_f64() * 1000.0
+            );
+        }
+    }
 
     fn test_label_penalty_context<'a>(
         kind: DiagramKind,

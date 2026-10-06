@@ -55,12 +55,19 @@ pub struct ParseOutput {
     pub init_config: Option<serde_json::Value>,
 }
 
+/// Dispatch to the diagram parser, then decode one layer of display-label entities.
+///
+/// # Errors
+///
+/// Returns an error for invalid initialization directives, an unknown diagram
+/// header, or syntax rejected by the selected parser. For typed preflight
+/// diagnostics, use [`crate::parse_mermaid_strict`].
 pub fn parse_mermaid(input: &str) -> Result<ParseOutput> {
     validate_init_directives(input)?;
     let Some(kind) = detect_diagram_kind(input) else {
         bail!("unknown or missing Mermaid diagram header");
     };
-    match kind {
+    let mut parsed = match kind {
         DiagramKind::Class => parse_class_diagram(input),
         DiagramKind::State => parse_state_diagram(input),
         DiagramKind::Sequence => parse_sequence_diagram(input),
@@ -84,7 +91,9 @@ pub fn parse_mermaid(input: &str) -> Result<ParseOutput> {
         DiagramKind::Treemap => parse_treemap_diagram(input),
         DiagramKind::XYChart => parse_xy_chart_diagram(input),
         DiagramKind::Flowchart => parse_flowchart(input),
-    }
+    }?;
+    crate::entities::decode_labels(&mut parsed.graph);
+    Ok(parsed)
 }
 
 fn validate_init_directives(input: &str) -> Result<()> {
@@ -202,7 +211,7 @@ fn detect_diagram_kind(input: &str) -> Option<DiagramKind> {
         {
             return Some(DiagramKind::Flowchart);
         }
-        if looks_like_flowchart_edge_syntax(&without_comment) {
+        if looks_like_flowchart_edge_syntax(without_comment) {
             return Some(DiagramKind::Flowchart);
         }
         return None;
@@ -265,6 +274,82 @@ fn has_missing_flowchart_edge_endpoint(line: &str) -> bool {
         .any(|m| trimmed[..m.start()].trim().is_empty() || trimmed[m.end()..].trim().is_empty())
 }
 
+/// Shortest valid Mermaid link token (`-->`, `---`, `-.-`, `==>`, `<--`).
+/// `ARROW_TOKEN_RE` also matches a lone `-` or `=`, which appears inside
+/// ordinary node ids, so length is what separates a link from a hyphen.
+const MIN_EDGE_TOKEN_LEN: usize = 3;
+
+/// Whether the line opens with an edge operator, i.e. it is the tail of a
+/// statement whose source node sits on an earlier line.
+pub(crate) fn starts_with_edge_token(line: &str) -> bool {
+    let masked = mask_bracket_content(line);
+    let trimmed = masked.trim_start();
+    ARROW_TOKEN_RE
+        .find(trimmed)
+        .is_some_and(|m| m.start() == 0 && m.len() >= MIN_EDGE_TOKEN_LEN)
+}
+
+/// Whether a previous statement may absorb a following edge continuation.
+/// The caller must strip trailing comments first, as in preprocessing.
+/// Headers and keyword statements never can, so a malformed document still
+/// fails loudly instead of folding an edge into `flowchart TD`.
+pub(crate) fn accepts_edge_continuation(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.ends_with(';') {
+        return false;
+    }
+    if HEADER_RE.is_match(trimmed) || SUBGRAPH_RE.is_match(trimmed) {
+        return false;
+    }
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    !matches!(
+        first_word,
+        "end"
+            | "classDef"
+            | "class"
+            | "style"
+            | "linkStyle"
+            | "click"
+            | "direction"
+            | "accTitle"
+            | "accDescr"
+            | "title"
+    )
+}
+
+/// Mermaid.js lexes flowchart edge operators as `\s*[xo<]?\-\-+[-xo>]\s*`
+/// (`flow.jison`), and `\s` matches newlines, so an edge operator is allowed to
+/// begin on its own line and continue the statement above it. Fold those
+/// continuation lines back onto their statement before parsing, so
+///
+/// ```text
+/// A
+///   --> B
+///   --> C
+/// ```
+///
+/// parses exactly like `A --> B --> C`.
+fn join_flowchart_edge_continuations(lines: Vec<String>) -> Vec<String> {
+    let mut joined: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in lines {
+        let continues_previous = joined
+            .last()
+            .is_some_and(|previous| accepts_edge_continuation(previous))
+            && starts_with_edge_token(&line);
+
+        match joined.last_mut() {
+            Some(previous) if continues_previous => {
+                previous.push(' ');
+                previous.push_str(line.trim_start());
+            }
+            _ => joined.push(line),
+        }
+    }
+
+    joined
+}
+
 fn preprocess_input(input: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
     let mut init_config: Option<serde_json::Value> = None;
     let mut lines = Vec::new();
@@ -299,6 +384,8 @@ fn preprocess_input(input: &str) -> Result<(Vec<String>, Option<serde_json::Valu
     Ok((lines, init_config))
 }
 
+/// Remove frontmatter and comments while retaining indentation for nested syntax
+/// and collecting the last initialization directive.
 fn preprocess_input_keep_indent(input: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
     let mut init_config: Option<serde_json::Value> = None;
     let mut lines = Vec::new();
@@ -327,18 +414,21 @@ fn preprocess_input_keep_indent(input: &str) -> Result<(Vec<String>, Option<serd
         if without_comment.trim().is_empty() {
             continue;
         }
-        lines.push(without_comment);
+        lines.push(without_comment.to_string());
     }
 
     Ok((lines, init_config))
 }
 
+/// Parse preprocessed statements after joining eligible edge continuations.
+/// Entity decoding remains a later step so label text cannot introduce syntax.
 fn parse_flowchart(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::Flowchart;
     let mut subgraph_stack: Vec<usize> = Vec::new();
 
     let (lines, init_config) = preprocess_input(input)?;
+    let lines = join_flowchart_edge_continuations(lines);
 
     for raw_line in lines {
         for line in split_statements(&raw_line) {
@@ -5151,6 +5241,8 @@ fn parse_state_diagram(input: &str) -> Result<ParseOutput> {
     Ok(ParseOutput { graph, init_config })
 }
 
+/// Parse messages, notes, and frame sections, recording half-open message and
+/// note ranges when frames close so layout can distinguish boundary notes.
 fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
     let mut graph = Graph::new();
     graph.kind = DiagramKind::Sequence;
@@ -5235,6 +5327,7 @@ fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
             };
             let start_idx = graph.edges.len();
             open_frames.push(crate::ir::SequenceFrame {
+                note_range: graph.sequence_notes.len()..graph.sequence_notes.len(),
                 kind,
                 sections: vec![crate::ir::SequenceFrameSection {
                     label,
@@ -5321,6 +5414,7 @@ fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
                     last.end_idx = end_idx;
                 }
                 frame.end_idx = end_idx;
+                frame.note_range.end = graph.sequence_notes.len();
                 frames.push(frame);
             } else if let Some(seq_box) = open_boxes.pop() {
                 graph.sequence_boxes.push(seq_box);
@@ -5442,6 +5536,7 @@ fn parse_sequence_diagram(input: &str) -> Result<ParseOutput> {
             last.end_idx = end_idx;
         }
         frame.end_idx = end_idx;
+        frame.note_range.end = graph.sequence_notes.len();
         frames.push(frame);
     }
     while let Some(seq_box) = open_boxes.pop() {
@@ -5483,12 +5578,14 @@ fn add_node_to_subgraphs(graph: &mut Graph, subgraph_stack: &[usize], node_id: &
     }
 }
 
+/// Split on semicolons outside node brackets, quotes, and pipe-delimited labels.
 fn split_statements(line: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut depth = 0i32;
     let mut quote: Option<char> = None;
     let mut escaped = false;
+    let mut in_pipe_label = false;
 
     for ch in line.chars() {
         if escaped {
@@ -5517,6 +5614,9 @@ fn split_statements(line: &str) -> Vec<String> {
             continue;
         }
 
+        if ch == '|' && depth == 0 {
+            in_pipe_label = !in_pipe_label;
+        }
         match ch {
             '[' | '(' | '{' => {
                 depth += 1;
@@ -5528,7 +5628,7 @@ fn split_statements(line: &str) -> Vec<String> {
                 }
                 current.push(ch);
             }
-            ';' if depth == 0 => {
+            ';' if depth == 0 && !in_pipe_label => {
                 let trimmed = current.trim();
                 if !trimmed.is_empty() {
                     parts.push(trimmed.to_string());
@@ -5546,58 +5646,32 @@ fn split_statements(line: &str) -> Vec<String> {
     parts
 }
 
-fn strip_trailing_comment(line: &str) -> String {
-    let mut quote: Option<char> = None;
-    let mut chars = line.chars().peekable();
-    let mut out = String::new();
-    while let Some(ch) = chars.next() {
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
-            }
-            out.push(ch);
-            continue;
-        }
-        if ch == '"' || ch == '\'' {
-            quote = Some(ch);
-            out.push(ch);
-            continue;
-        }
-        if ch == '%'
-            && let Some('%') = chars.peek().copied()
-        {
-            break;
-        }
-        out.push(ch);
-    }
-    out.trim().to_string()
+/// Borrow the non-comment portion so validation can normalize individual lines
+/// without allocating or rescanning an accumulated continuation chain.
+pub(crate) fn strip_trailing_comment(line: &str) -> &str {
+    strip_trailing_comment_keep_indent(line).trim_start()
 }
 
-fn strip_trailing_comment_keep_indent(line: &str) -> String {
+/// Borrow the prefix before an unquoted comment marker, preserving leading whitespace.
+fn strip_trailing_comment_keep_indent(line: &str) -> &str {
     let mut quote: Option<char> = None;
-    let mut chars = line.chars().peekable();
-    let mut out = String::new();
-    while let Some(ch) = chars.next() {
+    let mut chars = line.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
         if let Some(q) = quote {
             if ch == q {
                 quote = None;
             }
-            out.push(ch);
             continue;
         }
         if ch == '"' || ch == '\'' {
             quote = Some(ch);
-            out.push(ch);
             continue;
         }
-        if ch == '%'
-            && let Some('%') = chars.peek().copied()
-        {
-            break;
+        if ch == '%' && chars.peek().is_some_and(|(_, next)| *next == '%') {
+            return line[..index].trim_end();
         }
-        out.push(ch);
     }
-    out.trim_end().to_string()
+    line.trim_end()
 }
 
 fn extract_leading_decoration(right: &str) -> Option<(char, String)> {
@@ -5758,10 +5832,22 @@ fn split_on_ampersand(input: &str) -> Vec<&str> {
     parts
 }
 
+/// Split a multi-edge chain while retaining pipe labels on their own edges.
+/// Return None when the statement is not a chain or uses another label syntax.
 fn split_edge_chain(line: &str) -> Option<Vec<String>> {
-    let masked = mask_bracket_content(line);
-    if PIPE_LABEL_RE.is_match(&masked)
-        || QUOTED_LABEL_ARROW_RE.is_match(line)
+    // Pipe labels may contain arrow-looking text. Preserve byte offsets while
+    // excluding them from the edge scan, just like quoted node labels.
+    let mut masked = mask_bracket_content(line).into_bytes();
+    let mut in_label = false;
+    for byte in &mut masked {
+        if *byte == b'|' {
+            in_label = !in_label;
+        } else if in_label {
+            *byte = b' ';
+        }
+    }
+    let masked = String::from_utf8(masked).expect("mask preserves UTF-8");
+    if QUOTED_LABEL_ARROW_RE.is_match(line)
         || LABEL_ARROW_RE.is_match(&masked)
         || COMPACT_DOTTED_LABEL_ARROW_RE.is_match(&masked)
     {
@@ -6495,6 +6581,35 @@ fn count_indent(line: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    #[ignore = "manual scaling benchmark; run optimized with --nocapture"]
+    fn performance_scaling_continuations_and_entities() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        for count in [128, 512, 2048, 8192] {
+            let mut source = String::from("flowchart TD\n N0\n");
+            for i in 1..=count {
+                source.push_str(&format!(
+                    " -->|Unicode 日本語 #amp; arrow --> text| N{i}[Node #lt;{i}#gt;]\n"
+                ));
+            }
+            let mut samples = Vec::new();
+            for _ in 0..3 {
+                let start = Instant::now();
+                crate::validator::validate(black_box(&source)).unwrap();
+                let parsed = parse_mermaid(black_box(&source)).unwrap();
+                samples.push(start.elapsed());
+                assert_eq!(parsed.graph.edges.len(), count);
+                black_box(parsed);
+            }
+            samples.sort();
+            println!(
+                "continuations,{count},{:.3}",
+                samples[1].as_secs_f64() * 1000.0
+            );
+        }
+    }
     use super::*;
     use crate::ir::DiagramKind;
 
@@ -7705,6 +7820,52 @@ A["foo & bar"] & B --> C"#;
             line.len(),
             masked.len(),
             "masked string should have same byte length as original"
+        );
+    }
+
+    #[test]
+    fn parse_edge_operator_on_continuation_line() {
+        // Mermaid.js allows whitespace, including newlines, before an edge
+        // operator, so this chain is equivalent to `A --> B --> C`.
+        let input = "flowchart TD\n  A\n    --> B\n    --> C\n";
+        let parsed = parse_mermaid(input).unwrap();
+        let edges: Vec<(&str, &str)> = parsed
+            .graph
+            .edges
+            .iter()
+            .map(|edge| (edge.from.as_str(), edge.to.as_str()))
+            .collect();
+        assert_eq!(edges, vec![("A", "B"), ("B", "C")]);
+    }
+
+    #[test]
+    fn parse_labelled_edge_operator_on_continuation_line() {
+        let input = "flowchart LR\n  A[Start]\n    -->|yes| B[Stop]\n";
+        let parsed = parse_mermaid(input).unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+        assert_eq!(parsed.graph.edges[0].from, "A");
+        assert_eq!(parsed.graph.edges[0].to, "B");
+        assert_eq!(parsed.graph.edges[0].label.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn continuation_join_does_not_absorb_keyword_statements() {
+        // A leading edge operator after a header has no source node, so the
+        // document must still fail rather than fold into `flowchart TD`.
+        assert!(parse_mermaid("flowchart TD\n  --> B\n").is_err());
+        assert!(parse_mermaid("flowchart TD\n  subgraph S\n  --> B\n  end\n").is_err());
+    }
+
+    #[test]
+    fn short_dash_token_does_not_join_lines() {
+        // `ARROW_TOKEN_RE` also matches a lone `-`, which is not a link token.
+        // Joining on one would quietly turn this already-invalid document into
+        // an `A -b[Node]` edge, so the minimum token length preserves the
+        // pre-existing parse error instead of inventing an edge.
+        let err = parse_mermaid("flowchart LR\n  A\n  -b[Node]\n").unwrap_err();
+        assert!(
+            err.to_string().contains("invalid flowchart edge syntax"),
+            "unexpected error: {err}"
         );
     }
 }
