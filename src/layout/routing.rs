@@ -2359,24 +2359,28 @@ pub(super) fn path_obstacle_intersections(
     if points.len() < 2 {
         return 0;
     }
+    // Obstacles outer: the id/membership filter is per obstacle, not per segment.
     let mut count = 0usize;
-    for segment in points.windows(2) {
-        let (a, b) = (segment[0], segment[1]);
-        for obstacle in obstacles {
-            if obstacle.id == from_id || obstacle.id == to_id {
-                continue;
-            }
-            if let Some(members) = &obstacle.members
-                && (members.contains(from_id) || members.contains(to_id))
-            {
-                continue;
-            }
-            if segment_intersects_rect(a, b, obstacle) {
+    for obstacle in obstacles {
+        if obstacle_excluded(obstacle, from_id, to_id) {
+            continue;
+        }
+        for segment in points.windows(2) {
+            if segment_intersects_rect(segment[0], segment[1], obstacle) {
                 count += 1;
             }
         }
     }
     count
+}
+
+fn obstacle_excluded(obstacle: &Obstacle, from_id: &str, to_id: &str) -> bool {
+    obstacle.id == from_id
+        || obstacle.id == to_id
+        || obstacle
+            .members
+            .as_ref()
+            .is_some_and(|members| members.contains(from_id) || members.contains(to_id))
 }
 
 pub(super) fn path_label_intersections(
@@ -2413,29 +2417,22 @@ fn path_obstacle_near_intersections(
         return 0;
     }
     let mut count = 0usize;
-    for segment in points.windows(2) {
-        let (a, b) = (segment[0], segment[1]);
-        for obstacle in obstacles {
-            if obstacle.id == from_id || obstacle.id == to_id {
-                continue;
-            }
-            if let Some(members) = &obstacle.members
-                && (members.contains(from_id) || members.contains(to_id))
+    for obstacle in obstacles {
+        if obstacle_excluded(obstacle, from_id, to_id) {
+            continue;
+        }
+        let expanded = Obstacle {
+            id: String::new(),
+            x: obstacle.x - pad,
+            y: obstacle.y - pad,
+            width: obstacle.width + pad * 2.0,
+            height: obstacle.height + pad * 2.0,
+            members: None,
+        };
+        for segment in points.windows(2) {
+            let (a, b) = (segment[0], segment[1]);
+            if !segment_intersects_rect(a, b, obstacle) && segment_intersects_rect(a, b, &expanded)
             {
-                continue;
-            }
-            if segment_intersects_rect(a, b, obstacle) {
-                continue;
-            }
-            let expanded = Obstacle {
-                id: String::new(),
-                x: obstacle.x - pad,
-                y: obstacle.y - pad,
-                width: obstacle.width + pad * 2.0,
-                height: obstacle.height + pad * 2.0,
-                members: None,
-            };
-            if segment_intersects_rect(a, b, &expanded) {
                 count += 1;
             }
         }
