@@ -262,6 +262,23 @@ pub(super) fn point_in_polygon_strict(point: (f32, f32), polygon: &[(f32, f32)])
 }
 
 pub(super) fn point_inside_node_shape_strict(node: &NodeLayout, point: (f32, f32)) -> bool {
+    point_inside_node_shape_strict_with(node, node_shape_polygon(node).as_deref(), point)
+}
+
+/// The polygon `point_inside_node_shape_strict` tests against, or `None` for ellipses and
+/// shapes that fall back to the node bounds.
+fn node_shape_polygon(node: &NodeLayout) -> Option<Vec<(f32, f32)>> {
+    match node.shape {
+        NodeShape::Circle | NodeShape::DoubleCircle => None,
+        _ => shape_polygon_points(node),
+    }
+}
+
+fn point_inside_node_shape_strict_with(
+    node: &NodeLayout,
+    polygon: Option<&[(f32, f32)]>,
+    point: (f32, f32),
+) -> bool {
     match node.shape {
         NodeShape::Circle | NodeShape::DoubleCircle => {
             let (cx, cy) = node_center(node);
@@ -271,8 +288,8 @@ pub(super) fn point_inside_node_shape_strict(node: &NodeLayout, point: (f32, f32
             let ny = (point.1 - cy) / ry;
             nx * nx + ny * ny < 1.0
         }
-        _ => shape_polygon_points(node)
-            .map(|polygon| point_in_polygon_strict(point, &polygon))
+        _ => polygon
+            .map(|polygon| point_in_polygon_strict(point, polygon))
             .unwrap_or_else(|| point_inside_node_bounds_strict(node, point)),
     }
 }
@@ -282,10 +299,33 @@ pub(super) fn segment_hits_node_shape_interior(
     b: (f32, f32),
     node: &NodeLayout,
 ) -> bool {
+    // Every node shape lies within the node's bounds, so no sample of a segment whose bounding
+    // box misses them can be strictly inside. The slack absorbs interpolation rounding.
+    const SLACK: f32 = 1.0;
+    let (nx0, nx1) = (
+        node.x.min(node.x + node.width),
+        node.x.max(node.x + node.width),
+    );
+    let (ny0, ny1) = (
+        node.y.min(node.y + node.height),
+        node.y.max(node.y + node.height),
+    );
+    if a.0.max(b.0) < nx0 - SLACK
+        || a.0.min(b.0) > nx1 + SLACK
+        || a.1.max(b.1) < ny0 - SLACK
+        || a.1.min(b.1) > ny1 + SLACK
+    {
+        return false;
+    }
+    let polygon = node_shape_polygon(node);
     let steps = (((b.0 - a.0).hypot(b.1 - a.1) / 4.0).ceil() as usize).max(2);
     (1..steps).any(|i| {
         let t = i as f32 / steps as f32;
-        point_inside_node_shape_strict(node, (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t))
+        point_inside_node_shape_strict_with(
+            node,
+            polygon.as_deref(),
+            (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t),
+        )
     })
 }
 
