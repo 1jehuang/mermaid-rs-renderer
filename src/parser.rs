@@ -2640,6 +2640,14 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
                 push_requirement_node(&mut graph, &kind, &id, &classes);
                 current_id = Some(id.clone());
                 let tail = line[open_idx + 1..].trim();
+                // mermaid.js puts every attribute on its own line, so a
+                // same-line body (`element e { type: "s" }`) is a parse
+                // error upstream.
+                if !tail.is_empty() {
+                    bail!(
+                        "requirement diagram: attributes must be on their own line after '{{' (line: {line})"
+                    );
+                }
                 if let Some(close_idx) = tail.find('}') {
                     let fragment = tail[..close_idx].trim();
                     if !fragment.is_empty() {
@@ -4630,7 +4638,12 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
         }
         if lower.starts_with("y-axis") {
             let rest = line.get(6..).unwrap_or("").trim();
-            if !rest.is_empty() {
+            if rest.is_empty() {
+                bail!(
+                    "xychart diagram: y-axis needs a label, a range, or both (line: {line}; expected e.g. \"Label\" 0 --> 500)"
+                );
+            }
+            {
                 // Parse y-axis which can have label and/or range
                 // Format: y-axis "Label" min --> max  OR  y-axis min --> max  OR  y-axis "Label"
                 let rest_lower = rest.to_ascii_lowercase();
@@ -7803,6 +7816,11 @@ A["foo & bar"] & B --> C"#;
             label_only.graph.xychart.y_axis_label.as_deref(),
             Some("Orders")
         );
+        // A y-axis with neither label nor range is also a parse error upstream.
+        assert!(
+            parse_mermaid("xychart-beta\ntitle t\nx-axis [a]\ny-axis\nbar [1]\n").is_err(),
+            "an empty y-axis should be rejected"
+        );
     }
 
     #[test]
@@ -7821,6 +7839,12 @@ A["foo & bar"] & B --> C"#;
         )
         .unwrap();
         assert!(plain.graph.nodes.contains_key("req"));
+        // Attributes must each sit on their own line: an inline body is a
+        // parse error upstream.
+        assert!(
+            parse_mermaid("requirementDiagram\nelement e { type: \"s\" }\n").is_err(),
+            "an inline block body should be rejected"
+        );
     }
 
     #[test]
