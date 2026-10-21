@@ -2662,6 +2662,27 @@ fn parse_requirement_diagram(input: &str) -> Result<ParseOutput> {
         if let Some(attrs) = attributes.get(id)
             && !attrs.is_empty()
         {
+            for attr in attrs {
+                if let Some((key, value)) = attr.split_once(':')
+                    && key.trim().eq_ignore_ascii_case("id")
+                {
+                    let raw = value.trim();
+                    // mermaid's requirement lexer accepts only identifier
+                    // characters in an attribute value, so `RQ-1` parses as
+                    // `RQ` followed by `-1` and the line fails to parse there.
+                    // A quoted value is a distinct token type and parses as-is.
+                    let is_quoted = raw.starts_with('"') || raw.starts_with('\'');
+                    let value = strip_quotes(raw);
+                    if !is_quoted
+                        && !value.is_empty()
+                        && !value.chars().all(|ch| ch.is_alphanumeric() || ch == '_')
+                    {
+                        bail!(
+                            "requirement diagram: attribute 'id' must be a plain identifier without punctuation (line: {attr}; 'id: RQ1', not 'id: RQ-1')"
+                        );
+                    }
+                }
+            }
             let mut lines = Vec::new();
             lines.push(node.label.clone());
             lines.extend(attrs.iter().map(|attr| normalize_requirement_attr(attr)));
@@ -3583,6 +3604,9 @@ fn parse_sankey_diagram(input: &str) -> Result<ParseOutput> {
         if lower.starts_with("sankey") {
             continue;
         }
+        if lower == "title" || lower.starts_with("title ") {
+            bail!("sankey diagram: does not support 'title' statement (line: {line})");
+        }
         let parts = split_args(line);
         if parts.len() < 3 {
             continue;
@@ -4391,10 +4415,28 @@ fn parse_radar_curve(line: &str) -> Option<crate::ir::RadarCurve> {
     use crate::ir::{RadarCurve, RadarEntry};
     let rest = line.get(5..).unwrap_or("").trim();
     let (name_part, values_part) = rest.split_once('{')?;
-    let name = strip_quotes(name_part.trim());
-    if name.is_empty() {
+    let name_part = name_part.trim();
+    // mermaid.js accepts `curve id[Display label] {…}`: the id names the curve
+    // and the bracketed text is what the legend shows. Without this split the
+    // whole `id[label]` token leaks into the legend as literal text.
+    let (id_part, label): (&str, Option<&str>) = if let Some(stripped) = name_part.strip_suffix(']')
+        && let Some(open_idx) = stripped.rfind('[')
+    {
+        (
+            stripped[..open_idx].trim(),
+            Some(stripped[open_idx + 1..].trim()),
+        )
+    } else {
+        (name_part, None)
+    };
+    let display = label
+        .filter(|label| !label.is_empty())
+        .map(strip_quotes)
+        .unwrap_or_else(|| strip_quotes(id_part));
+    if display.is_empty() {
         return None;
     }
+    let name = display;
     let values_raw = values_part.split_once('}')?.0;
     let entries = split_args_keep_empty(values_raw)
         .into_iter()
@@ -4611,7 +4653,18 @@ fn parse_xy_chart_diagram(input: &str) -> Result<ParseOutput> {
                         graph.xychart.y_axis_label = Some(strip_quotes(label_part));
                     }
                 } else {
-                    graph.xychart.y_axis_label = Some(strip_quotes(rest));
+                    // No range separator. A bare label alone is legal
+                    // (`y-axis "Label"`); anything trailing it without `-->`
+                    // is not, and mermaid.js rejects it with a parse error.
+                    let no_range = rest.trim();
+                    let label_only =
+                        no_range.starts_with('"') && no_range.ends_with('"') && no_range.len() > 1;
+                    if !label_only && no_range.split_whitespace().count() > 1 {
+                        bail!(
+                            "xychart diagram: y-axis range needs '-->' separator (line: {line}; expected e.g. \"Label\" 0 --> 500)"
+                        );
+                    }
+                    graph.xychart.y_axis_label = Some(strip_quotes(no_range));
                 }
             }
             continue;
@@ -7705,6 +7758,85 @@ A["foo & bar"] & B --> C"#;
             line.len(),
             masked.len(),
             "masked string should have same byte length as original"
+        );
+    }
+
+    // Regression tests for constructs mermaid.js rejects but this renderer
+    // used to accept silently. Each one previously produced a confident,
+    // wrong SVG instead of an error.
+
+    #[test]
+    fn sankey_title_statement_is_rejected() {
+        // mermaid.js sankey has no `title` statement; GitHub's renderer
+        // fails to parse the diagram entirely.
+        let with_title = parse_mermaid("sankey-beta\ntitle Channel volume\nA,B,10\n");
+        assert!(with_title.is_err());
+        let err = with_title.unwrap_err().to_string();
+        assert!(err.contains("title"), "error should name the token: {err}");
+        // Without the statement the same diagram still parses.
+        let parsed = parse_mermaid("sankey-beta\nA,B,10\n").unwrap();
+        assert_eq!(parsed.graph.edges.len(), 1);
+    }
+
+    #[test]
+    fn xychart_y_axis_range_requires_arrow_delimiter() {
+        // `to` is a bare word to mermaid.js, which expects `-->`.
+        let worded = parse_mermaid(
+            "xychart-beta\ntitle t\nx-axis [a]\ny-axis \"Orders\" 0 to 500\nbar [1]\n",
+        );
+        assert!(worded.is_err());
+        let err = worded.unwrap_err().to_string();
+        assert!(
+            err.contains("-->"),
+            "error should name the delimiter: {err}"
+        );
+        // The `-->` form still parses, and so does a bare label.
+        let parsed = parse_mermaid(
+            "xychart-beta\ntitle t\nx-axis [a]\ny-axis \"Orders\" 0 --> 500\nbar [1]\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.graph.xychart.y_axis_max, Some(500.0));
+        let label_only =
+            parse_mermaid("xychart-beta\ntitle t\nx-axis [a]\ny-axis \"Orders\"\nbar [1]\n")
+                .unwrap();
+        assert_eq!(
+            label_only.graph.xychart.y_axis_label.as_deref(),
+            Some("Orders")
+        );
+    }
+
+    #[test]
+    fn requirement_id_with_punctuation_is_rejected() {
+        // The lexer splits `RQ-1` into two tokens, so mermaid.js reports a
+        // parse error on that line.
+        let hyphenated = parse_mermaid(
+            "requirementDiagram\nrequirement req {\nid: RQ-1\ntext: t\nrisk: low\nverifymethod: test\n}\n",
+        );
+        assert!(hyphenated.is_err());
+        let err = hyphenated.unwrap_err().to_string();
+        assert!(err.contains("RQ-1"), "error should quote the token: {err}");
+        // A plain identifier and a quoted value both parse.
+        let plain = parse_mermaid(
+            "requirementDiagram\nrequirement req {\nid: RQ_1\ntext: t\nrisk: low\nverifymethod: test\n}\n",
+        )
+        .unwrap();
+        assert!(plain.graph.nodes.contains_key("req"));
+    }
+
+    #[test]
+    fn radar_curve_bracket_label_renders_as_label() {
+        // `curve id[Display label] {…}` used to leak `id[label]` into the
+        // legend as literal text.
+        let parsed =
+            parse_mermaid("radar-beta\naxis A, B\ncurve orders[Orders service] {1, 2}\n").unwrap();
+        let curve = parsed.graph.radar.curves.first().expect("one curve");
+        assert_eq!(curve.name, "Orders service");
+        // The quoted-label form is unaffected.
+        let quoted =
+            parse_mermaid("radar-beta\naxis A, B\ncurve \"Orders service\" {1, 2}\n").unwrap();
+        assert_eq!(
+            quoted.graph.radar.curves.first().unwrap().name,
+            "Orders service"
         );
     }
 }
