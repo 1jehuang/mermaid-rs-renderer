@@ -5817,7 +5817,7 @@ fn render_er_node(
         }
         if !attr.keys.is_empty() {
             let mut row_badge_width = 0.0f32;
-            for key in attr.keys.iter().take(2) {
+            for key in &attr.keys {
                 let text_width =
                     text_metrics::measure_text_width(key, font_size * 0.72, &theme.font_family)
                         .unwrap_or(font_size * 0.9);
@@ -5897,7 +5897,7 @@ fn render_er_node(
         }
 
         let mut cursor_x = x + pad_x;
-        for key in attr.keys.iter().take(2) {
+        for key in &attr.keys {
             let fill = match key.as_str() {
                 "PK" => "#1D4ED8",
                 "FK" => "#0F766E",
