@@ -2829,7 +2829,12 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
             config,
             obstacles: &obstacles,
             label_obstacles: &route_label_obstacles,
-            fast_route: tiny_graph,
+            // The main route search must respect the same work budget as
+            // port selection, including bounded and linear large-graph tiers.
+            fast_route: tiny_graph
+                || routing_performance
+                    .side_search
+                    .is_some_and(|profile| profile.fast_route),
             base_offset,
             start_side: port_info.start_side,
             end_side: port_info.end_side,

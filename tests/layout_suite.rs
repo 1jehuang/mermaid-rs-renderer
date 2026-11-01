@@ -1640,3 +1640,74 @@ fn multiple_state_notes_on_one_side_search_outward() {
     assert!(second.x > first.x, "later right note should move outward");
     assert!(second.x + second.width <= layout.width);
 }
+
+#[test]
+fn large_branching_flowcharts_preserve_nodes_edges_styles_and_geometry() {
+    use mermaid_rs_renderer::layout::flowchart_quality_metrics;
+    for direction in ["TD", "LR"] {
+        let mut source = format!("flowchart {direction}\nN0 --> N1\n");
+        for n in 1..256 {
+            source.push_str(&format!("N{n} --> N{}\n", n * 2));
+            if n % 2 == 0 {
+                source.push_str(&format!("N{n} --> N{}\n", n + 1));
+            }
+        }
+        source.push_str("classDef marked fill:#ffcc00,stroke:#112233\nclass N0,N2,N510 marked\n");
+        let graph = parse_mermaid(&source).unwrap().graph;
+        let config = LayoutConfig {
+            fast_text_metrics: true,
+            ..Default::default()
+        };
+        let layout = compute_layout(&graph, &Theme::dark(), &config);
+        assert_eq!(layout.nodes.len(), 384);
+        assert_eq!(layout.edges.len(), 383);
+        for edge in &graph.edges {
+            assert!(
+                layout
+                    .edges
+                    .iter()
+                    .any(|drawn| drawn.from == edge.from && drawn.to == edge.to)
+            );
+        }
+        for id in ["N0", "N2", "N510"] {
+            assert_eq!(layout.nodes[id].style.fill.as_deref(), Some("#ffcc00"));
+        }
+        let quality = flowchart_quality_metrics(&layout).unwrap();
+        assert_eq!(quality.geometry_debt_count(), 0, "{direction}: {quality:?}");
+        assert_layout_is_well_formed(&layout, "flowchart/large_branching");
+        assert_valid_svg(
+            &render_svg(&layout, &Theme::dark(), &config),
+            "large_branching",
+        );
+    }
+}
+
+#[test]
+fn large_flowcharts_keep_labeled_cycles_and_subgraphs_well_formed() {
+    for direction in ["TD", "LR"] {
+        let mut source = format!("flowchart {direction}\n");
+        for group in 0..4 {
+            source.push_str(&format!("subgraph G{group}\n"));
+            for n in group * 20..group * 20 + 19 {
+                source.push_str(&format!("N{n} -->|next| N{}\n", n + 1));
+            }
+            source.push_str("end\n");
+        }
+        source.push_str("N19 --> N20\nN39 --> N40\nN59 --> N60\nN79 -->|retry| N0\n");
+        let graph = parse_mermaid(&source).unwrap().graph;
+        let config = LayoutConfig {
+            fast_text_metrics: true,
+            ..Default::default()
+        };
+        let layout = compute_layout(&graph, &Theme::dark(), &config);
+        assert_eq!(layout.nodes.len(), 80);
+        assert_eq!(layout.edges.len(), 80);
+        assert_eq!(layout.subgraphs.len(), 4);
+        assert_layout_is_well_formed(&layout, "flowchart/large_labeled_cycle");
+        assert_flowchart_visual_invariants(&layout, "flowchart/large_labeled_cycle");
+        assert_valid_svg(
+            &render_svg(&layout, &Theme::dark(), &config),
+            "large_labeled_cycle",
+        );
+    }
+}
