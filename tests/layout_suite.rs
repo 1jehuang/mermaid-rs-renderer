@@ -1640,3 +1640,37 @@ fn multiple_state_notes_on_one_side_search_outward() {
     assert!(second.x > first.x, "later right note should move outward");
     assert!(second.x + second.width <= layout.width);
 }
+
+/// Asserts each pair's first class lies entirely above its second.
+fn assert_class_rows(source: &str, above_below: &[(&str, &str)]) {
+    let parsed = parse_mermaid(source).expect("parse class diagram");
+    let layout = compute_layout(&parsed.graph, &Theme::modern(), &LayoutConfig::default());
+    for (above, below) in above_below {
+        let a = layout.nodes.get(*above).expect("class above");
+        let b = layout.nodes.get(*below).expect("class below");
+        assert!(
+            a.y + a.height <= b.y,
+            "{above} (y {}..{}) should be above {below} (y {}..{})",
+            a.y,
+            a.y + a.height,
+            b.y,
+            b.y + b.height
+        );
+    }
+}
+
+#[test]
+fn class_chain_into_hierarchy_keeps_its_ranks() {
+    assert_class_rows(
+        r#"classDiagram
+    Document "1" *-- "many" Block : contains
+    DiagramRenderer <|.. MermaidRenderer
+    Block --> DiagramRenderer : uses
+"#,
+        &[
+            ("Document", "Block"),
+            ("Block", "DiagramRenderer"),
+            ("DiagramRenderer", "MermaidRenderer"),
+        ],
+    );
+}

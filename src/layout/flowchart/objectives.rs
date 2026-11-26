@@ -270,6 +270,13 @@ fn relax_edge_span_constraints(
             if !has_center_label && !has_endpoint_label {
                 continue;
             }
+            // Class diagrams: an edge between classes on the same rank
+            // carries its label sideways, so there is no main-axis gap to
+            // widen. Pushing one end down a step only drops it onto the next
+            // rank, among the classes there.
+            if graph.kind == DiagramKind::Class && current_main_gap < 0.0 {
+                continue;
+            }
 
             let mut required_main_gap =
                 (config.node_spacing * objective.edge_gap_floor_ratio).max(8.0);
@@ -343,11 +350,32 @@ fn relax_edge_span_constraints(
                     changed = true;
                     continue;
                 }
-                let ahead_id = if main_delta >= 0.0 {
-                    edge.to.as_str()
+                let (ahead_id, behind_id) = if main_delta >= 0.0 {
+                    (edge.to.as_str(), edge.from.as_str())
                 } else {
-                    edge.from.as_str()
+                    (edge.from.as_str(), edge.to.as_str())
                 };
+                if graph.kind == DiagramKind::Class
+                    && let Some(behind) = nodes.get(behind_id)
+                {
+                    // Widen the gap between ranks rather than moving one
+                    // class: everything past the near end's rank moves
+                    // along, so ranks stay aligned and the far class's own
+                    // edges (an implementation under an interface, say)
+                    // keep their room instead of being squeezed or pushed
+                    // aside by the overlap pass.
+                    let behind_end =
+                        node_main_center(behind, horizontal) + node_main_half(behind, horizontal);
+                    for node in nodes.values_mut() {
+                        let start =
+                            node_main_center(node, horizontal) - node_main_half(node, horizontal);
+                        if start >= behind_end - 0.5 {
+                            shift_node_main(node, horizontal, delta);
+                        }
+                    }
+                    changed = true;
+                    continue;
+                }
                 if let Some(node) = nodes.get_mut(ahead_id) {
                     shift_node_main(node, horizontal, delta);
                     changed = true;
