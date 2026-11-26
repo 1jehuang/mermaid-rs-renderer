@@ -408,20 +408,33 @@ pub(in crate::layout) fn assign_positions_manual(
                 }
                 let mut sum = 0.0f32;
                 let mut count = 0usize;
+                // Only classes that hang off the hierarchy alone are moved
+                // beside it. A class that is also related to other
+                // non-hierarchy classes keeps its rank: moving it would put
+                // it level with, or below, classes its own edges rank it
+                // above, turning a tidy chain into sideways and upward edges.
+                let mut satellite = true;
                 for edge in &layout_edges {
-                    if edge.from == *node_id {
-                        if let Some(rank) = ranks.get(&edge.to) {
-                            sum += *rank as f32;
-                            count += 1;
-                        }
-                    } else if edge.to == *node_id
-                        && let Some(rank) = ranks.get(&edge.from)
-                    {
+                    let other = if edge.from == *node_id {
+                        &edge.to
+                    } else if edge.to == *node_id {
+                        &edge.from
+                    } else {
+                        continue;
+                    };
+                    if other == node_id {
+                        continue;
+                    }
+                    if !hierarchy_nodes.contains(other) {
+                        satellite = false;
+                        break;
+                    }
+                    if let Some(rank) = ranks.get(other) {
                         sum += *rank as f32;
                         count += 1;
                     }
                 }
-                if count == 0 {
+                if !satellite || count == 0 {
                     continue;
                 }
                 let avg_neighbor_rank = (sum / count as f32).round().max(0.0) as usize;
