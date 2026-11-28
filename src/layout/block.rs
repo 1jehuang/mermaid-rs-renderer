@@ -1,4 +1,26 @@
+use super::geometry::{ray_ellipse_intersection, ray_polygon_intersection, shape_polygon_points};
 use super::*;
+
+/// The point where the straight line from the center of `node` towards
+/// `target` crosses the border of the node. Block edges run from center to
+/// center, and nodes are painted over the edges, so an edge that ends at a
+/// center has its arrowhead hidden under the node.
+fn block_edge_endpoint(node: &NodeLayout, target: (f32, f32)) -> (f32, f32) {
+    let center = (node.x + node.width / 2.0, node.y + node.height / 2.0);
+    let dir = (target.0 - center.0, target.1 - center.1);
+    if dir.0.abs() < f32::EPSILON && dir.1.abs() < f32::EPSILON {
+        return center;
+    }
+    let hit = match node.shape {
+        crate::ir::NodeShape::Circle | crate::ir::NodeShape::DoubleCircle => {
+            ray_ellipse_intersection(center, dir, center, node.width / 2.0, node.height / 2.0)
+        }
+        _ => {
+            shape_polygon_points(node).and_then(|poly| ray_polygon_intersection(center, dir, &poly))
+        }
+    };
+    hit.unwrap_or(center)
+}
 
 pub(super) fn compute_block_layout(graph: &Graph, theme: &Theme, config: &LayoutConfig) -> Layout {
     let mut nodes = build_graph_node_layouts(graph, theme, config);
@@ -161,7 +183,10 @@ pub(super) fn compute_block_layout(graph: &Graph, theme: &Theme, config: &Layout
             label_anchor: None,
             start_label_anchor: None,
             end_label_anchor: None,
-            points: vec![from_center, to_center],
+            points: vec![
+                block_edge_endpoint(from_layout, to_center),
+                block_edge_endpoint(to_layout, from_center),
+            ],
             directed: edge.directed,
             arrow_start: edge.arrow_start,
             arrow_end: edge.arrow_end,

@@ -725,3 +725,44 @@ fn state_concurrent_regions_render_dividers_and_per_region_starts() {
         "three concurrent regions need exactly two dividers"
     );
 }
+
+#[test]
+fn block_edge_ends_at_node_borders_so_arrowhead_is_visible() {
+    let input = "block-beta\n  columns 2\n  a b\n  c d\n  a --> d\n";
+    let (graph, layout, svg) = render(input);
+    assert_eq!(graph.kind, DiagramKind::Block);
+    assert_eq!(layout.edges.len(), 1);
+    assert!(
+        svg.contains("marker-end"),
+        "the edge should have an arrowhead"
+    );
+
+    // Nodes are painted over edges: an endpoint strictly inside a node
+    // hides the arrowhead under it.
+    let strictly_inside = |id: &str, (x, y): (f32, f32)| {
+        let node = layout.nodes.get(id).expect(id);
+        let eps = 0.01;
+        x > node.x + eps
+            && x < node.x + node.width - eps
+            && y > node.y + eps
+            && y < node.y + node.height - eps
+    };
+    let points = &layout.edges[0].points;
+    let (start, end) = (points[0], points[points.len() - 1]);
+    assert!(
+        !strictly_inside("a", start),
+        "edge should start on the border of a, got {start:?}"
+    );
+    assert!(
+        !strictly_inside("d", end),
+        "edge should end on the border of d, got {end:?}"
+    );
+    let (a, d) = (
+        layout.nodes.get("a").expect("a"),
+        layout.nodes.get("d").expect("d"),
+    );
+    assert!(
+        start.0 <= a.x + a.width + 0.01 && end.0 >= d.x - 0.01,
+        "edge should run from a to d, got {start:?} -> {end:?}"
+    );
+}
